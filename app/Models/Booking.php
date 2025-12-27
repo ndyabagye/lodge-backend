@@ -11,6 +11,9 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Builder;
 
+/**
+ * @mixin IdeHelperBooking
+ */
 class Booking extends Model
 {
     use HasFactory, HasUuids, SoftDeletes;

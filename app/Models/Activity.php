@@ -9,6 +9,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Builder;
 
+/**
+ * @mixin IdeHelperActivity
+ */
 class Activity extends Model
 {
     use HasFactory, HasUuids, SoftDeletes;

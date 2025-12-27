@@ -9,6 +9,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Builder;
 
+/**
+ * @mixin IdeHelperReview
+ */
 class Review extends Model
 {
     use HasFactory, HasUuids, SoftDeletes;

@@ -11,6 +11,9 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Builder;
 
+/**
+ * @mixin IdeHelperAccommodation
+ */
 class Accommodation extends Model
 {
     use HasFactory, HasUuids, SoftDeletes;
@@ -64,9 +67,9 @@ class Accommodation extends Model
 
     /**
      * Get the featured image associated with the accommodation.
-     * @return \Illuminate\Database\Eloquent\Relations\HasOne
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany
      */
-    public function featuredImage(): HasOne
+    public function featuredImage(): HasMany
     {
         return $this->hasMany(AccommodationImage::class)
             ->where("is_featured", true)
