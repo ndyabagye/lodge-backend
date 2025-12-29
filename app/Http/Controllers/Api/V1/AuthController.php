@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\UserRole;
+use App\Enums\UserStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\ChangePasswordRequest;
 use App\Http\Requests\Auth\ForgotPasswordRequest;
@@ -17,11 +19,10 @@ use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-// use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Str;
-use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
@@ -36,13 +37,12 @@ class AuthController extends Controller
             'email' => $request->email,
             'phone' => $request->phone,
             'password' => Hash::make($request->password),
-            'role' => 'guest',
-            'status' => 'active',
+            'role' => UserRole::GUEST,
+            'status' => UserStatus::ACTIVE,
         ]);
 
-        // Create default preferences
-        UserPreference::create([
-            'user_id' => $user->id,
+        // Create default user preferences
+        $user->preferences()->create([
             'email_notifications' => true,
             'sms_notifications' => false,
             'marketing_communications' => false,
@@ -52,16 +52,13 @@ class AuthController extends Controller
 
         $token = $user->createToken('auth-token')->plainTextToken;
 
-        return response()->json(
-            [
-                'data' => [
-                    'user' => new UserResource($user->load('preferences')),
-                    'token' => $token,
-                ],
-                'message' => 'Registration successful',
+        return response()->json([
+            'message' => 'Registration successful. Please check your email to verify your account.',
+            'data' => [
+                'user' => new UserResource($user->load('preferences')),
+                'token' => $token,
             ],
-            201,
-        );
+        ], 201);
     }
 
     /**
@@ -69,34 +66,31 @@ class AuthController extends Controller
      */
     public function login(LoginRequest $request): JsonResponse
     {
+        if (! Auth::attempt($request->only('email', 'password'))) {
+            return response()->json([
+                'message' => 'Invalid credentials',
+            ], 401);
+        }
+
         $user = User::where('email', $request->email)->first();
 
-        if (! $user || ! Hash::check($request->password, $user->password)) {
-            throw ValidationException::withMessages([
-                'email' => ['The provided credentials are incorrect.'],
-            ]);
+        if (! $user->isActive()) {
+            return response()->json([
+                'message' => 'Your account has been suspended. Please contact support.',
+            ], 403);
         }
 
-        if ($user->status !== 'active') {
-            return response()->json(
-                [
-                    'message' => 'Your account has been suspended. Please contact support.',
-                ],
-                403,
-            );
-        }
-
-        // Revoke existing tokens
+        // Revoke old tokens (optional - enforce single session)
         $user->tokens()->delete();
 
         $token = $user->createToken('auth-token')->plainTextToken;
 
         return response()->json([
+            'message' => 'Login successful',
             'data' => [
                 'user' => new UserResource($user->load('preferences')),
                 'token' => $token,
             ],
-            'message' => 'Login successful',
         ]);
     }
 
@@ -105,8 +99,7 @@ class AuthController extends Controller
      */
     public function logout(Request $request): JsonResponse
     {
-        $token = $request->user()->currentAccessToken();
-        $token->delete();
+        $request->user()->currentAccessToken()->delete();
 
         return response()->json([
             'message' => 'Logged out successfully',
@@ -136,9 +129,9 @@ class AuthController extends Controller
             ]);
         }
 
-        throw ValidationException::withMessages([
-            'email' => [__($status)],
-        ]);
+        return response()->json([
+            'message' => 'Unable to send reset link',
+        ], 500);
     }
 
     /**
@@ -172,9 +165,9 @@ class AuthController extends Controller
             ]);
         }
 
-        throw ValidationException::withMessages([
-            'email' => [__($status)],
-        ]);
+        return response()->json([
+            'message' => __($status),
+        ], 400);
     }
 
     /**
@@ -188,6 +181,12 @@ class AuthController extends Controller
         ]);
 
         $user = User::findOrFail($request->id);
+
+        if (! $user) {
+            return response()->json([
+                'message' => 'User not found',
+            ], 404);
+        }
 
         if (! hash_equals((string) $request->hash, sha1($user->email))) {
             return response()->json(
@@ -204,7 +203,9 @@ class AuthController extends Controller
             ]);
         }
 
-        $user->markEmailAsVerified();
+        if ($user->markEmailAsVerified()) {
+            event(new Verified($user));
+        }
 
         return response()->json([
             'message' => 'Email verified successfully',

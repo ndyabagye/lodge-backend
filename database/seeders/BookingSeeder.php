@@ -34,6 +34,7 @@ class BookingSeeder extends Seeder
                 $user = $users->random();
 
                 Booking::create([
+                    'booking_number' => Booking::generateBookingNumber(),
                     'user_id' => $user->id,
                     'accommodation_id' => $accommodation->id,
                     'check_in_date' => $checkIn,

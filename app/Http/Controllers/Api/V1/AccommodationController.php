@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\Booking\CheckAvailabilityRequest;
 use App\Http\Resources\AccommodationResource;
 use App\Http\Resources\ReviewResource;
 use App\Models\Accommodation;
@@ -87,21 +86,14 @@ class AccommodationController extends Controller
     /**
      * Get single accommodation by ID
      */
-    public function show(string $id): JsonResponse
+    public function show(Accommodation $accommodation): JsonResponse
     {
-        $accommodation = Accommodation::with([
-            'images',
-            'amenities',
-            'reviews' => function ($query) {
-                $query->where('status', 'approved')
-                    ->with('user')
-                    ->latest()
-                    ->limit(10);
-            }
-        ])->findOrFail($id);
-
         // Increment views
         $accommodation->incrementViews();
+
+        $accommodation->load(['images', 'amenities', 'reviews' => function ($query) {
+            $query->approved()->with('user')->latest()->limit(10);
+        }]);
 
         return response()->json([
             'data' => new AccommodationResource($accommodation),
@@ -113,18 +105,12 @@ class AccommodationController extends Controller
      */
     public function showBySlug(string $slug): JsonResponse
     {
-        $accommodation = Accommodation::with([
-            'images',
-            'amenities',
-            'reviews' => function ($query) {
-                $query->where('status', 'approved')
-                    ->with('user')
-                    ->latest()
-                    ->limit(10);
-            }
-        ])->where('slug', $slug)->firstOrFail();
 
-        // Increment views
+        $accommodation = Accommodation::where('slug', $slug)
+            ->with(['images', 'amenities', 'reviews' => function ($query) {
+                $query->approved()->with('user')->latest()->limit(10);
+            }])->firstOrFail();
+
         $accommodation->incrementViews();
 
         return response()->json([
@@ -135,35 +121,46 @@ class AccommodationController extends Controller
     /**
      * Check accommodation availability
      */
-    public function checkAvailability(
-        string $id,
-        CheckAvailabilityRequest $request
-    ): JsonResponse {
-        $accommodation = Accommodation::findOrFail($id);
+    public function checkAvailability(Request $request, Accommodation $accommodation): JsonResponse
+    {
+        $request->validate([
+            'start_date' => 'required|date|after_or_equal:today',
+            'end_date' => 'required|date|after:start_date',
+        ]);
+
+        $checkIn = Carbon::parse($request->start_date);
+        $checkOut = Carbon::parse($request->end_date);
 
         $availability = $this->availabilityService->checkAvailability(
             $accommodation,
-            Carbon::parse($request->start_date),
-            Carbon::parse($request->end_date)
+            $checkIn,
+            $checkOut
+        );
+
+        // Get unavailable dates for calendar
+        $unavailableDates = $this->availabilityService->getUnavailableDates(
+            $accommodation,
+            $checkIn->copy()->startOfMonth(),
+            $checkIn->copy()->addMonths(2)->endOfMonth()
         );
 
         return response()->json([
-            'data' => $availability,
+            'data' => array_merge($availability, [
+                'unavailable_dates' => $unavailableDates,
+            ]),
         ]);
     }
 
     /**
      * Get accommodation reviews
      */
-    public function reviews(string $id): JsonResponse
+    public function reviews(Accommodation $accommodation): JsonResponse
     {
-        $accommodation = Accommodation::findOrFail($id);
-
         $reviews = $accommodation->reviews()
-            ->where('status', 'approved')
+            ->approved()
             ->with('user')
             ->latest()
-            ->paginate(15);
+            ->paginate(20);
 
         return response()->json([
             'data' => ReviewResource::collection($reviews),
@@ -172,8 +169,8 @@ class AccommodationController extends Controller
                 'last_page' => $reviews->lastPage(),
                 'per_page' => $reviews->perPage(),
                 'total' => $reviews->total(),
-                'average_rating' => round($accommodation->rating, 2),
-            ],
+                'average_rating' => $accommodation->rating,
+            ]
         ]);
     }
 }

@@ -8,6 +8,7 @@ use App\Http\Resources\ReviewResource;
 use App\Models\Activity;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Notifications\Action;
 
 class ActivityController extends Controller
 {
@@ -40,15 +41,25 @@ class ActivityController extends Controller
         }
 
         // Filter featured
-        if ($request->boolean('featured')) {
+        if ($request->has('featured') && $request->featured === 'true') {
             $query->where('featured', true);
+        }
+
+        // Search
+        if ($request->has('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'ilike', "%{$search}%")
+                  ->orWhere('description', 'ilike', "%{$search}%")
+                  ->orWhere('category', 'ilike', "%{$search}%");
+            });
         }
 
         // Sort
         $sortBy = $request->get('sort_by', 'created_at');
         $sortOrder = $request->get('sort_order', 'desc');
 
-        $allowedSorts = ['created_at', 'name', 'price', 'rating'];
+        $allowedSorts = ['name', 'price', 'rating', 'created_at', 'duration'];
         if (in_array($sortBy, $allowedSorts)) {
             $query->orderBy($sortBy, $sortOrder);
         }
@@ -75,20 +86,14 @@ class ActivityController extends Controller
     /**
      * Get single activity by ID
      */
-    public function show(string $id): JsonResponse
+    public function show(Activity $activity): JsonResponse
     {
-        $activity = Activity::with([
-            'images',
-            'reviews' => function ($query) {
-                $query->where('status', 'approved')
-                    ->with('user')
-                    ->latest()
-                    ->limit(10);
-            }
-        ])->findOrFail($id);
+        $activity->load(['images', 'reviews' => function ($query) {
+            $query->approved()->with('user')->latest()->limit(10);
+        }]);
 
         return response()->json([
-            'data' => new ActivityResource($activity),
+            'data' => new ActivityResource($activity)
         ]);
     }
 
@@ -97,7 +102,8 @@ class ActivityController extends Controller
      */
     public function showBySlug(string $slug): JsonResponse
     {
-        $activity = Activity::with([
+        $activity = Activity::where('slug', $slug)
+            ->with([
             'images',
             'reviews' => function ($query) {
                 $query->where('status', 'approved')
@@ -105,7 +111,8 @@ class ActivityController extends Controller
                     ->latest()
                     ->limit(10);
             }
-        ])->where('slug', $slug)->firstOrFail();
+        ])
+            ->firstOrFail();
 
         return response()->json([
             'data' => new ActivityResource($activity),
@@ -115,24 +122,28 @@ class ActivityController extends Controller
     /**
      * Check activity availability for a date
      */
-    public function checkAvailability(string $id, Request $request): JsonResponse
+    public function checkAvailability(Request $request, Activity $activity): JsonResponse
     {
         $request->validate([
-            'date' => ['required', 'date', 'after_or_equal:today'],
+            'date' => 'required|date|after_or_equal:today',
+            'participants' => 'nullable|integer|min:1',
         ]);
 
-        $activity = Activity::findOrFail($id);
+        // Simple availability check
+        $available = $activity->isAvailable();
 
-        // Basic availability check - can be extended
-        $available = $activity->status === 'available';
+        if ($activity->max_participants && $request->participants) {
+            $available = $available && $request->participants <= $activity->max_participants;
+        }
 
         return response()->json([
             'data' => [
                 'available' => $available,
+                'activity' => new ActivityResource($activity),
                 'message' => $available
-                    ? 'Activity is available for booking'
-                    : 'Activity is currently unavailable',
-            ],
+                    ? 'Activity is available for the selected date'
+                    : 'Activity is not available',
+            ]
         ]);
     }
 
