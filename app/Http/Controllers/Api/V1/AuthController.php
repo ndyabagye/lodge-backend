@@ -15,8 +15,10 @@ use App\Http\Requests\Auth\UpdateProfileRequest;
 use App\Http\Resources\UserResource;
 use App\Models\User;
 use App\Models\UserPreference;
+use App\Notifications\WelcomeUser;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Auth\Events\Registered;
+use Illuminate\Auth\Events\Verified;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -50,15 +52,18 @@ class AuthController extends Controller
 
         event(new Registered($user));
 
+        // Send welcome email
+        $user->notify(new WelcomeUser($user));
+
         $token = $user->createToken('auth-token')->plainTextToken;
 
-        return response()->json([
-            'message' => 'Registration successful. Please check your email to verify your account.',
-            'data' => [
+        return $this->createdResponse(
+            [
                 'user' => new UserResource($user->load('preferences')),
                 'token' => $token,
             ],
-        ], 201);
+            'Registration successful. Please check your email to verify your account.'
+        );
     }
 
     /**

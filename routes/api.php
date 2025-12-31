@@ -1,15 +1,17 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\V1\AccommodationController;
 use App\Http\Controllers\Api\V1\ActivityController;
-use App\Http\Controllers\Api\V1\AuthController;
-use App\Http\Controllers\Api\V1\BookingController;
-use App\Http\Controllers\Api\V1\Admin\DashboardController;
 use App\Http\Controllers\Api\V1\Admin\AccommodationController as AdminAccommodationController;
 use App\Http\Controllers\Api\V1\Admin\ActivityController as AdminActivityController;
 use App\Http\Controllers\Api\V1\Admin\BookingController as AdminBookingController;
+use App\Http\Controllers\Api\V1\Admin\DashboardController;
 use App\Http\Controllers\Api\V1\Admin\UserController as AdminUserController;
+use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\BookingController;
+use App\Http\Controllers\Api\V1\PaymentController;
+use App\Models\Booking;
+use Illuminate\Support\Facades\Route;
 
 // Public routes
 Route::prefix('v1')->group(function () {
@@ -38,6 +40,14 @@ Route::prefix('v1')->group(function () {
         Route::get('/slug/{slug}', [ActivityController::class, 'showBySlug']);
         Route::get('/{id}/availability', [ActivityController::class, 'checkAvailability']);
         Route::get('/{id}/reviews', [ActivityController::class, 'reviews']);
+    });
+
+    // Payment Webhooks (No authentication - validated via signature)
+    Route::prefix('webhooks')->group(function () {
+        Route::post('/stripe', [App\Http\Controllers\Api\V1\PaymentController::class, 'stripeWebhook'])->name('webhooks.stripe');
+        Route::post('/flutterwave', [App\Http\Controllers\Api\V1\PaymentController::class, 'flutterwaveWebhook'])->name('webhooks.flutterwave');
+        Route::post('/pesapal', [App\Http\Controllers\Api\V1\PaymentController::class, 'pesapalWebhook'])->name('webhooks.pesapal');
+        Route::post('/iotec', [App\Http\Controllers\Api\V1\PaymentController::class, 'iotecWebhook'])->name('webhooks.iotec');
     });
 });
 
@@ -68,6 +78,19 @@ Route::prefix('v1')->middleware(['auth:sanctum'])->group(function () {
         Route::delete('/{id}', [BookingController::class, 'destroy']);
         Route::post('/check-availability', [BookingController::class, 'checkAvailability']);
         Route::get('/{id}/invoice', [BookingController::class, 'invoice']);
+    });
+
+    // Payment routes
+    Route::prefix('payments')->controller(App\Http\Controllers\Api\V1\PaymentController::class)->group(function () {
+        Route::get('/gateways', 'gateways');
+        Route::post('/bookings/{booking}/initialize', 'initialize');
+        Route::post('/verify', 'verify');
+        Route::post('/{payment}/refund', 'refund')->middleware('staff');
+    });
+
+    // admin payment stats
+    Route::middleware(['staff'])->group(function () {
+        Route::get('admin/payments/statistics', [App\Http\Controllers\Api\V1\PaymentController::class, 'statistics']);
     });
 
     // Admin routes
@@ -112,4 +135,15 @@ Route::prefix('v1')->middleware(['auth:sanctum'])->group(function () {
             Route::delete('/{id}', [AdminUserController::class, 'destroy']);
         });
     });
+
+    // Invoice & Receipt downloads
+    Route::get('/bookings/{booking}/invoice', [BookingController::class, 'downloadInvoice']);
+    Route::get('/bookings/{booking}/invoice/preview', function (Request $request, Booking $booking) {
+        if ($booking->user_id !== $request->user()->id && !$request->user()->isStaff()) {
+            abort(403);
+        }
+        return app(\App\Services\InvoiceService::class)->previewInvoice($booking);
+    });
+
+    Route::get('/payments/{payment}/receipt', [PaymentController::class, 'downloadReceipt']);
 });

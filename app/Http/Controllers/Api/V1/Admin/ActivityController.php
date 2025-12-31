@@ -4,154 +4,158 @@ namespace App\Http\Controllers\Api\V1\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\ActivityRequest;
+use App\Http\Requests\Admin\StoreActivityRequest;
+use App\Http\Requests\Admin\UpdateActivityRequest;
 use App\Http\Requests\Admin\UploadImagesRequest;
 use App\Http\Resources\ActivityResource;
 use App\Models\Activity;
 use App\Models\ActivityImage;
+use App\Services\ImageService;
+use App\Traits\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
-use Intervention\Image\Image as InterventionImage;
+use Illuminate\Support\Facades\DB;
 
 class ActivityController extends Controller
 {
+    use ApiResponse;
+
+    public function __construct(
+        private ImageService $imageService
+    ) {}
+
     /**
-     * List all activities
+     * List all activities (admin view)
      */
     public function index(Request $request): JsonResponse
     {
         $query = Activity::with('images');
 
-        if ($request->has('status')) {
+        // Apply filters
+        if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
 
-        if ($request->has('search')) {
+        if ($request->filled('category')) {
+            $query->where('category', $request->category);
+        }
+
+        if ($request->filled('search')) {
             $search = $request->search;
-            $query->where('name', 'like', "%{$search}%");
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'ilike', "%{$search}%")
+                  ->orWhere('category', 'ilike', "%{$search}%");
+            });
         }
 
         $activities = $query->latest()->paginate($request->get('per_page', 15));
 
-        return response()->json([
-            'data' => ActivityResource::collection($activities),
-            'meta' => [
-                'current_page' => $activities->currentPage(),
-                'last_page' => $activities->lastPage(),
-                'per_page' => $activities->perPage(),
-                'total' => $activities->total(),
-            ],
-        ]);
+        return $this->paginatedResponse($activities, ActivityResource::class);
     }
 
     /**
      * Create activity
      */
-    public function store(ActivityRequest $request): JsonResponse
+    public function store(StoreActivityRequest $request): JsonResponse
     {
         $activity = Activity::create($request->validated());
 
-        return response()->json([
-            'data' => new ActivityResource($activity->load('images')),
-            'message' => 'Activity created successfully',
-        ], 201);
+        return $this->createdResponse(
+            new ActivityResource($activity->load('images')),
+            'Activity created successfully'
+        );
+    }
+
+    /**
+     * Show activity
+     */
+    public function show(Activity $activity): JsonResponse
+    {
+        $activity->load('images');
+
+        return $this->resourceResponse(new ActivityResource($activity), 200);
     }
 
     /**
      * Update activity
      */
-    public function update(ActivityRequest $request, string $id): JsonResponse
+    public function update(UpdateActivityRequest $request, Activity $activity): JsonResponse
     {
-        $activity = Activity::findOrFail($id);
         $activity->update($request->validated());
 
-        return response()->json([
-            'data' => new ActivityResource($activity->fresh('images')),
-            'message' => 'Activity updated successfully',
-        ]);
+        return $this->resourceResponse(
+            new ActivityResource($activity->fresh('images')),
+            'Activity updated successfully'
+        );
     }
 
     /**
      * Delete activity
      */
-    public function destroy(string $id): JsonResponse
+    public function destroy(Activity $activity): JsonResponse
     {
-        $activity = Activity::findOrFail($id);
-
-        foreach ($activity->images as $image) {
-            Storage::disk('public')->delete($image->url);
-            if ($image->thumbnail_url) {
-                Storage::disk('public')->delete($image->thumbnail_url);
-            }
-        }
-
         $activity->delete();
 
-        return response()->json([
-            'message' => 'Activity deleted successfully',
-        ]);
+        return $this->successResponse(null, 'Activity deleted successfully');
     }
 
     /**
-     * Upload images
+     * Upload images for activity
      */
-    public function uploadImages(UploadImagesRequest $request, string $id): JsonResponse
+    public function uploadImages(UploadImagesRequest $request, Activity $activity): JsonResponse
     {
-        $activity = Activity::findOrFail($id);
+        try {
+            $uploadedImages = [];
+            $order = $activity->images()->max('order') ?? 0;
 
-        $images = [];
-        $lastOrder = $activity->images()->max('order') ?? 0;
+            DB::beginTransaction();
 
-        foreach ($request->file('images') as $index => $file) {
-            $filename = Str::uuid() . '.' . $file->getClientOriginalExtension();
-            $path = "activities/{$activity->id}";
+            foreach ($request->file('images') as $file) {
+                $imageData = $this->imageService->uploadImage($file, 'activities');
 
-            $file->storeAs($path, $filename, 'public');
+                $image = $activity->images()->create([
+                    'url' => $imageData['url'],
+                    'thumbnail_url' => $imageData['thumbnail_url'],
+                    'order' => ++$order,
+                    'is_featured' => false,
+                ]);
 
-            $thumbnailFilename = 'thumb_' . $filename;
-            $thumbnail = InterventionImage::make($file)->fit(400, 300);
-            Storage::disk('public')->put(
-                "{$path}/{$thumbnailFilename}",
-                $thumbnail->encode()
+                $uploadedImages[] = $image;
+            }
+
+            DB::commit();
+
+            return $this->successResponse(
+                $uploadedImages,
+                'Images uploaded successfully'
             );
 
-            $image = ActivityImage::create([
-                'activity_id' => $activity->id,
-                'url' => "storage/{$path}/{$filename}",
-                'thumbnail_url' => "storage/{$path}/{$thumbnailFilename}",
-                'alt_text' => $request->alt_texts[$index] ?? null,
-                'caption' => $request->captions[$index] ?? null,
-                'order' => ++$lastOrder,
-                'is_featured' => $index === 0 && $activity->images()->count() === 0,
-            ]);
-
-            $images[] = $image;
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return $this->errorResponse('Failed to upload images: ' . $e->getMessage(), 500);
         }
-
-        return response()->json([
-            'data' => $images,
-            'message' => 'Images uploaded successfully',
-        ], 201);
     }
 
     /**
-     * Delete image
+     * Delete activity image
      */
-    public function deleteImage(string $id, string $imageId): JsonResponse
+    public function deleteImage(Activity $activity, ActivityImage $image): JsonResponse
     {
-        $activity = Activity::findOrFail($id);
-        $image = ActivityImage::where('activity_id', $id)->findOrFail($imageId);
-
-        Storage::disk('public')->delete($image->url);
-        if ($image->thumbnail_url) {
-            Storage::disk('public')->delete($image->thumbnail_url);
+        if ($image->activity_id !== $activity->id) {
+            return $this->errorResponse(
+                'Image does not belong to this activity',
+                422
+            );
         }
 
-        $image->delete();
+        try {
+            $this->imageService->deleteImage($image->url, $image->thumbnail_url);
+            $image->delete();
 
-        return response()->json([
-            'message' => 'Image deleted successfully',
-        ]);
+            return $this->successResponse(null, 'Image deleted successfully');
+
+        } catch (\Exception $e) {
+            return $this->errorResponse('Failed to delete image: ' . $e->getMessage(), 500);
+        }
     }
 }

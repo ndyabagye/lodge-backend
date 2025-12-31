@@ -2,16 +2,17 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Exceptions\BookingException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Booking\CheckAvailabilityRequest;
 use App\Http\Requests\Booking\CreateBookingRequest;
+use App\Http\Requests\Booking\UpdateBookingRequest;
 use App\Http\Resources\BookingResource;
 use App\Models\Accommodation;
 use App\Models\Booking;
 use App\Services\AvailabilityService;
 use App\Services\BookingService;
 use App\Services\PricingService;
-use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -24,64 +25,33 @@ class BookingController extends Controller
     ) {}
 
     /**
-     * List user's bookings (or all for admin)
+     * List user's bookings
      */
     public function index(Request $request): JsonResponse
     {
-        $user = $request->user();
+        $query = Booking::with(['accommodation.images', 'payments'])
+            ->where('user_id', $request->user()->id);
 
-        $query = Booking::with(['accommodation.images', 'payments']);
-
-        // Admin can see all bookings, users see only their own
-        if (!$user->isAdmin() && !$user->isStaff()) {
-            $query->where('user_id', $user->id);
-        }
-
-        // Filter by status
-        if ($request->has('status')) {
+        // Apply filters
+        if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
 
-        // Filter by payment status
-        if ($request->has('payment_status')) {
-            $query->where('payment_status', $request->payment_status);
-        }
-
-        // Search by booking number or guest name
-        if ($request->has('search')) {
-            $search = $request->search;
-            $query->where(function ($q) use ($search) {
-                $q->where('booking_number', 'like', "%{$search}%")
-                    ->orWhere('guest_first_name', 'like', "%{$search}%")
-                    ->orWhere('guest_last_name', 'like', "%{$search}%")
-                    ->orWhere('guest_email', 'like', "%{$search}%");
-            });
-        }
-
-        // Filter by date range
-        if ($request->has('from_date')) {
+        if ($request->filled('from_date')) {
             $query->where('check_in_date', '>=', $request->from_date);
         }
 
-        if ($request->has('to_date')) {
-            $query->where('check_out_date', '<=', $request->to_date);
+        if ($request->filled('to_date')) {
+            $query->where('check_in_date', '<=', $request->to_date);
         }
 
         $bookings = $query->latest()->paginate($request->get('per_page', 15));
 
-        return response()->json([
-            'data' => BookingResource::collection($bookings),
-            'meta' => [
-                'current_page' => $bookings->currentPage(),
-                'last_page' => $bookings->lastPage(),
-                'per_page' => $bookings->perPage(),
-                'total' => $bookings->total(),
-            ],
-        ]);
+        return $this->paginatedResponse($bookings, BookingResource::class);
     }
 
     /**
-     * Create a new booking
+     * Create new booking
      */
     public function store(CreateBookingRequest $request): JsonResponse
     {
@@ -91,159 +61,128 @@ class BookingController extends Controller
 
             $booking = $this->bookingService->createBooking($data);
 
-            return response()->json([
-                'data' => new BookingResource($booking),
-                'message' => 'Booking created successfully',
-            ], 201);
+            return $this->createdResponse(
+                new BookingResource($booking),
+                'Booking created successfully'
+            );
+
+        } catch (BookingException $e) {
+            return $this->errorResponse($e->getMessage(), $e->getCode());
         } catch (\Exception $e) {
-            return response()->json([
-                'message' => $e->getMessage(),
-            ], 422);
+            return $this->errorResponse('Booking failed: '.$e->getMessage(), 500);
         }
     }
 
     /**
      * Get single booking
      */
-    public function show(Request $request, string $id): JsonResponse
+    public function show(Request $request, Booking $booking): JsonResponse
     {
-        $user = $request->user();
-
-        $booking = Booking::with(['accommodation.images', 'user', 'payments'])
-            ->findOrFail($id);
-
-        // Check authorization
-        if (!$user->isAdmin() && !$user->isStaff() && $booking->user_id !== $user->id) {
-            return response()->json([
-                'message' => 'Unauthorized',
-            ], 403);
+        // Authorization check
+        if ($booking->user_id !== $request->user()->id && ! $request->user()->isStaff()) {
+            return $this->forbiddenResponse('You do not have access to this booking');
         }
 
-        return response()->json([
-            'data' => new BookingResource($booking),
-        ]);
+        $booking->load(['accommodation.images', 'payments', 'user']);
+
+        return $this->resourceResponse(new BookingResource($booking));
     }
 
     /**
-     * Update booking (limited fields)
+     * Update booking
      */
-    public function update(Request $request, string $id): JsonResponse
+    public function update(UpdateBookingRequest $request, Booking $booking): JsonResponse
     {
-        $user = $request->user();
+        try {
+            $booking = $this->bookingService->updateBooking($booking, $request->validated());
 
-        $booking = Booking::findOrFail($id);
+            return $this->resourceResponse(
+                new BookingResource($booking),
+                'Booking updated successfully'
+            );
 
-        // Check authorization
-        if (!$user->isAdmin() && !$user->isStaff() && $booking->user_id !== $user->id) {
-            return response()->json([
-                'message' => 'Unauthorized',
-            ], 403);
+        } catch (BookingException $e) {
+            return $this->errorResponse($e->getMessage(), $e->getCode());
         }
-
-        $request->validate([
-            'special_requests' => ['sometimes', 'string', 'max:1000'],
-            'guest_phone' => ['sometimes', 'string', 'max:20'],
-        ]);
-
-        $booking->update($request->only(['special_requests', 'guest_phone']));
-
-        return response()->json([
-            'data' => new BookingResource($booking->fresh(['accommodation', 'payments'])),
-            'message' => 'Booking updated successfully',
-        ]);
     }
 
     /**
      * Cancel booking
      */
-    public function destroy(Request $request, string $id): JsonResponse
+    public function destroy(Request $request, Booking $booking): JsonResponse
     {
-        $user = $request->user();
-
-        $booking = Booking::findOrFail($id);
-
-        // Check authorization
-        if (!$user->isAdmin() && !$user->isStaff() && $booking->user_id !== $user->id) {
-            return response()->json([
-                'message' => 'Unauthorized',
-            ], 403);
+        // Authorization check
+        if ($booking->user_id !== $request->user()->id && ! $request->user()->isStaff()) {
+            return $this->forbiddenResponse('You do not have permission to cancel this booking');
         }
 
         try {
-            $this->bookingService->cancelBooking($booking);
+            $result = $this->bookingService->cancelBooking(
+                $booking,
+                $request->input('reason')
+            );
 
-            return response()->json([
-                'message' => 'Booking cancelled successfully',
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => $e->getMessage(),
-            ], 422);
+            return $this->successResponse(
+                [
+                    'booking' => new BookingResource($result['booking']),
+                    'refund_info' => $result['refund_info'],
+                ],
+                'Booking cancelled successfully'
+            );
+
+        } catch (BookingException $e) {
+            return $this->errorResponse($e->getMessage(), $e->getCode());
         }
     }
 
     /**
-     * Check availability and get pricing
+     * Check availability and calculate price
      */
     public function checkAvailability(CheckAvailabilityRequest $request): JsonResponse
     {
-        $request->validate([
-            'accommodation_id' => ['required', 'uuid', 'exists:accommodations,id'],
-        ]);
-
         $accommodation = Accommodation::findOrFail($request->accommodation_id);
 
-        $checkIn = Carbon::parse($request->start_date);
-        $checkOut = Carbon::parse($request->end_date);
-
-        // Check availability
         $availability = $this->availabilityService->checkAvailability(
             $accommodation,
-            $checkIn,
-            $checkOut
+            $request->check_in_date,
+            $request->check_out_date
         );
 
-        // If available, calculate pricing
-        $pricing = null;
-        if ($availability['available']) {
-            $pricing = $this->pricingService->calculatePrice(
-                $accommodation,
-                $checkIn,
-                $checkOut
-            );
+        if (! $availability['available']) {
+            return $this->errorResponse($availability['message'], 422, $availability);
         }
 
-        return response()->json([
-            'data' => [
-                'available' => $availability['available'],
-                'message' => $availability['message'],
-                'pricing' => $pricing,
+        $pricing = $this->pricingService->calculateBookingPrice(
+            $accommodation,
+            $request->check_in_date,
+            $request->check_out_date,
+            $request->input('discount', 0)
+        );
+
+        return $this->successResponse([
+            'available' => true,
+            'accommodation' => [
+                'id' => $accommodation->id,
+                'name' => $accommodation->name,
+                'max_guests' => $accommodation->max_guests,
             ],
+            'availability' => $availability,
+            'pricing' => $pricing,
         ]);
     }
 
     /**
      * Download booking invoice (PDF)
      */
-    public function invoice(Request $request, string $id): JsonResponse
+    public function downloadInvoice(Request $request, Booking $booking)
     {
-        $user = $request->user();
-
-        $booking = Booking::with(['accommodation', 'user', 'payments'])
-            ->findOrFail($id);
-
-        // Check authorization
-        if (!$user->isAdmin() && !$user->isStaff() && $booking->user_id !== $user->id) {
-            return response()->json([
-                'message' => 'Unauthorized',
-            ], 403);
+        // Authorization check
+        if ($booking->user_id !== $request->user()->id && ! $request->user()->isStaff()) {
+            return $this->forbiddenResponse('You do not have access to this invoice');
         }
 
-        // TODO: Generate PDF invoice
-        // For now, return booking data
-        return response()->json([
-            'data' => new BookingResource($booking),
-            'message' => 'PDF generation to be implemented',
-        ]);
+        $invoiceService = app(\App\Services\InvoiceService::class);
+
+        return $invoiceService->downloadInvoice($booking);
     }
 }

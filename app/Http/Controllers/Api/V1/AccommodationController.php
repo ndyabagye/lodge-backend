@@ -7,12 +7,15 @@ use App\Http\Resources\AccommodationResource;
 use App\Http\Resources\ReviewResource;
 use App\Models\Accommodation;
 use App\Services\AvailabilityService;
+use App\Traits\ApiResponse;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class AccommodationController extends Controller
 {
+    use ApiResponse;
+
     public function __construct(
         private AvailabilityService $availabilityService
     ) {}
@@ -22,65 +25,52 @@ class AccommodationController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Accommodation::with(['images', 'featuredImage', 'amenities'])
+        $query = Accommodation::with(['images', 'amenities'])
             ->where('status', 'available');
 
-        // Search by name or description
-        if ($request->has('search')) {
-            $search = $request->search;
-            $query->whereFullText(['name', 'short_description', 'description'], $search);
-        }
-
-        // Filter by type
-        if ($request->has('type')) {
+        // Apply filters
+        if ($request->filled('type')) {
             $query->where('type', $request->type);
         }
 
-        // Filter by price range
-        if ($request->has('min_price')) {
+        if ($request->filled('min_price')) {
             $query->where('base_price', '>=', $request->min_price);
         }
 
-        if ($request->has('max_price')) {
+        if ($request->filled('max_price')) {
             $query->where('base_price', '<=', $request->max_price);
         }
 
-        // Filter by minimum guests
-        if ($request->has('min_guests')) {
+        if ($request->filled('min_guests')) {
             $query->where('max_guests', '>=', $request->min_guests);
         }
 
-        // Filter featured
-        if ($request->boolean('featured')) {
+        if ($request->filled('featured') && $request->featured === 'true') {
             $query->where('featured', true);
         }
 
-        // Sort
+        // Search
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'ilike', "%{$search}%")
+                    ->orWhere('description', 'ilike', "%{$search}%")
+                    ->orWhere('type', 'ilike', "%{$search}%");
+            });
+        }
+
+        // Sorting
         $sortBy = $request->get('sort_by', 'created_at');
         $sortOrder = $request->get('sort_order', 'desc');
 
-        $allowedSorts = ['created_at', 'name', 'base_price', 'rating', 'bookings'];
+        $allowedSorts = ['name', 'base_price', 'rating', 'created_at', 'views', 'bookings'];
         if (in_array($sortBy, $allowedSorts)) {
             $query->orderBy($sortBy, $sortOrder);
         }
 
         $accommodations = $query->paginate($request->get('per_page', 15));
 
-        return response()->json([
-            'data' => AccommodationResource::collection($accommodations),
-            'meta' => [
-                'current_page' => $accommodations->currentPage(),
-                'last_page' => $accommodations->lastPage(),
-                'per_page' => $accommodations->perPage(),
-                'total' => $accommodations->total(),
-            ],
-            'links' => [
-                'first' => $accommodations->url(1),
-                'last' => $accommodations->url($accommodations->lastPage()),
-                'prev' => $accommodations->previousPageUrl(),
-                'next' => $accommodations->nextPageUrl(),
-            ],
-        ]);
+        return $this->paginatedResponse($accommodations, AccommodationResource::class);
     }
 
     /**
@@ -91,13 +81,15 @@ class AccommodationController extends Controller
         // Increment views
         $accommodation->incrementViews();
 
-        $accommodation->load(['images', 'amenities', 'reviews' => function ($query) {
-            $query->approved()->with('user')->latest()->limit(10);
-        }]);
-
-        return response()->json([
-            'data' => new AccommodationResource($accommodation),
+        $accommodation->load([
+            'images',
+            'amenities',
+            'reviews' => function ($query) {
+                $query->approved()->with('user')->latest()->limit(10);
+            },
         ]);
+
+        return $this->resourceResponse(new AccommodationResource($accommodation), 200);
     }
 
     /**
@@ -105,17 +97,13 @@ class AccommodationController extends Controller
      */
     public function showBySlug(string $slug): JsonResponse
     {
-
         $accommodation = Accommodation::where('slug', $slug)
-            ->with(['images', 'amenities', 'reviews' => function ($query) {
-                $query->approved()->with('user')->latest()->limit(10);
-            }])->firstOrFail();
+            ->with(['images', 'amenities'])
+            ->firstOrFail();
 
         $accommodation->incrementViews();
 
-        return response()->json([
-            'data' => new AccommodationResource($accommodation),
-        ]);
+        return $this->resourceResponse(new AccommodationResource($accommodation), 200);
     }
 
     /**
@@ -128,27 +116,32 @@ class AccommodationController extends Controller
             'end_date' => 'required|date|after:start_date',
         ]);
 
-        $checkIn = Carbon::parse($request->start_date);
-        $checkOut = Carbon::parse($request->end_date);
-
         $availability = $this->availabilityService->checkAvailability(
             $accommodation,
-            $checkIn,
-            $checkOut
+            $request->start_date,
+            $request->end_date
         );
 
-        // Get unavailable dates for calendar
+        // Get unavailable dates for calendar (2 months window)
+        $from = Carbon::parse($request->start_date)->startOfMonth();
+        $to = $from->copy()->addMonths(2)->endOfMonth();
+
         $unavailableDates = $this->availabilityService->getUnavailableDates(
             $accommodation,
-            $checkIn->copy()->startOfMonth(),
-            $checkIn->copy()->addMonths(2)->endOfMonth()
+            $from,
+            $to
         );
 
-        return response()->json([
-            'data' => array_merge($availability, [
+        return $this->successResponse(
+            array_merge($availability, [
+                'accommodation' => [
+                    'id' => $accommodation->id,
+                    'name' => $accommodation->name,
+                    'max_guests' => $accommodation->max_guests,
+                ],
                 'unavailable_dates' => $unavailableDates,
-            ]),
-        ]);
+            ])
+        , 200);
     }
 
     /**
@@ -162,15 +155,13 @@ class AccommodationController extends Controller
             ->latest()
             ->paginate(20);
 
-        return response()->json([
-            'data' => ReviewResource::collection($reviews),
-            'meta' => [
-                'current_page' => $reviews->currentPage(),
-                'last_page' => $reviews->lastPage(),
-                'per_page' => $reviews->perPage(),
-                'total' => $reviews->total(),
-                'average_rating' => $accommodation->rating,
-            ]
-        ]);
+        $response = $this->paginatedResponse($reviews, ReviewResource::class);
+
+        // Add additional meta data
+        $data = $response->getData(true);
+        $data['meta']['average_rating'] = (float) $accommodation->rating;
+        $data['meta']['total_reviews'] = $accommodation->reviews()->approved()->count();
+
+        return response()->json($data);
     }
 }

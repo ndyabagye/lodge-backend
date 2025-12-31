@@ -3,131 +3,192 @@
 namespace App\Services;
 
 use App\Models\Accommodation;
+use App\Models\Activity;
 use Carbon\Carbon;
 
 class PricingService
 {
     private const TAX_RATE = 0.18; // 18% tax
 
+    private const SERVICE_FEE_RATE = 0.05; // 5% service fee
+
     /**
      * Calculate total price for a booking
      */
-    public function calculatePrice(
+    public function calculateBookingPrice(
         Accommodation $accommodation,
-        Carbon $checkIn,
-        Carbon $checkOut,
-        array $options = [],
+        string|Carbon $checkIn,
+        string|Carbon $checkOut,
+        float $discount = 0
     ): array {
+        $checkIn = $checkIn instanceof Carbon ? $checkIn : Carbon::parse($checkIn);
+        $checkOut = $checkOut instanceof Carbon ? $checkOut : Carbon::parse($checkOut);
+
         $nights = $checkIn->diffInDays($checkOut);
+        $breakdown = [];
+        $subtotal = 0;
 
-        // Calculate base price
-        $subtotal = $this->calculateSubtotal(
-            $accommodation,
-            $checkIn,
-            $checkOut,
-            $nights,
-        );
+        // Calculate nightly rates
+        $period = $checkIn->daysUntil($checkOut);
 
-        // Get fees
-        $cleaningFee = $accommodation->cleaning_fee;
-        $serviceFee = $options["service_fee"] ?? 0;
-        $discount = $options["discount"] ?? 0;
+        foreach ($period as $date) {
+            $isWeekend = $date->isWeekend();
+            $rate = $isWeekend ? $accommodation->weekend_price : $accommodation->base_price;
 
-        // Calculate tax (on subtotal + cleaning fee)
-        $taxableAmount = $subtotal + $cleaningFee;
-        $taxAmount = round($taxableAmount * self::TAX_RATE, 2);
+            $breakdown[] = [
+                'date' => $date->format('Y-m-d'),
+                'day' => $date->format('l'),
+                'rate' => (float) $rate,
+                'type' => $isWeekend ? 'weekend' : 'weekday',
+            ];
+
+            $subtotal += $rate;
+        }
+
+        // Calculate fees
+        $cleaningFee = (float) $accommodation->cleaning_fee;
+        $serviceFee = $subtotal * self::SERVICE_FEE_RATE;
+        $subtotalBeforeTax = $subtotal + $cleaningFee + $serviceFee;
+
+        // Apply discount
+        $discountAmount = (float) $discount;
+        $subtotalAfterDiscount = $subtotalBeforeTax - $discountAmount;
+
+        // Calculate tax on subtotal after discount
+        $taxAmount = $subtotalAfterDiscount * self::TAX_RATE;
 
         // Calculate total
-        $total =
-            $subtotal + $cleaningFee + $serviceFee + $taxAmount - $discount;
+        $total = $subtotalAfterDiscount + $taxAmount;
 
         return [
-            "nights" => $nights,
-            "subtotal" => round($subtotal, 2),
-            "cleaning_fee" => round($cleaningFee, 2),
-            "service_fee" => round($serviceFee, 2),
-            "tax_amount" => $taxAmount,
-            "discount" => round($discount, 2),
-            "total_amount" => round($total, 2),
-            "breakdown" => $this->getPriceBreakdown(
-                $accommodation,
-                $checkIn,
-                $checkOut,
-            ),
+            'nights' => $nights,
+            'check_in' => $checkIn->toDateString(),
+            'check_out' => $checkOut->toDateString(),
+            'nightly_breakdown' => $breakdown,
+            'subtotal' => round($subtotal, 2),
+            'cleaning_fee' => round($cleaningFee, 2),
+            'service_fee' => round($serviceFee, 2),
+            'discount' => round($discountAmount, 2),
+            'subtotal_before_tax' => round($subtotalAfterDiscount, 2),
+            'tax_amount' => round($taxAmount, 2),
+            'tax_rate' => self::TAX_RATE * 100 .'%',
+            'total_amount' => round($total, 2),
+            'currency' => 'UGX',
         ];
     }
 
     /**
-     * Calculate subtotal based on night prices
+     * Calculate price for activity
      */
-    private function calculateSubtotal(
-        Accommodation $accommodation,
-        Carbon $checkIn,
-        Carbon $checkOut,
-        int $nights,
-    ): float {
-        $subtotal = 0;
-        $current = $checkIn->copy();
-
-        for ($i = 0; $i < $nights; $i++) {
-            $price = $this->getPriceForDate($accommodation, $current);
-            $subtotal += $price;
-            $current->addDay();
-        }
-
-        return $subtotal;
-    }
-
-    /**
-     * Get price for a specific date
-     */
-    private function getPriceForDate(
-        Accommodation $accommodation,
-        Carbon $date,
-    ): float {
-        // Check if it's a weekend (Friday or Saturday)
-        if (in_array($date->dayOfWeek, [Carbon::FRIDAY, Carbon::SATURDAY])) {
-            return $accommodation->weekend_price;
-        }
-
-        return $accommodation->base_price;
-    }
-
-    /**
-     * Get detailed price breakdown by date
-     */
-    private function getPriceBreakdown(
-        Accommodation $accommodation,
-        Carbon $checkIn,
-        Carbon $checkOut,
+    public function calculateActivityPrice(
+        Activity $activity,
+        int $adults = 1,
+        int $children = 0,
+        bool $isGroup = false
     ): array {
-        $breakdown = [];
-        $current = $checkIn->copy();
-        $nights = $checkIn->diffInDays($checkOut);
+        if ($isGroup && $activity->group_price) {
+            $total = (float) $activity->group_price;
 
-        for ($i = 0; $i < $nights; $i++) {
-            $price = $this->getPriceForDate($accommodation, $current);
-            $breakdown[] = [
-                "date" => $current->format("Y-m-d"),
-                "day" => $current->format("l"),
-                "price" => $price,
-                "is_weekend" => in_array($current->dayOfWeek, [
-                    Carbon::FRIDAY,
-                    Carbon::SATURDAY,
-                ]),
+            return [
+                'pricing_type' => 'group',
+                'participants' => [
+                    'adults' => $adults,
+                    'children' => $children,
+                    'total' => $adults + $children,
+                ],
+                'rates' => [
+                    'group_rate' => (float) $activity->group_price,
+                ],
+                'total' => round($total, 2),
+                'currency' => 'UGX',
             ];
-            $current->addDay();
         }
 
-        return $breakdown;
+        // Individual pricing
+        $adultPrice = $activity->adult_price ?? $activity->price;
+        $childPrice = $activity->child_price ?? ($activity->price * 0.7);
+
+        $adultTotal = $adults * $adultPrice;
+        $childTotal = $children * $childPrice;
+        $total = $adultTotal + $childTotal;
+
+        return [
+            'pricing_type' => 'individual',
+            'participants' => [
+                'adults' => $adults,
+                'children' => $children,
+                'total' => $adults + $children,
+            ],
+            'rates' => [
+                'adult_price' => (float) $adultPrice,
+                'child_price' => (float) $childPrice,
+            ],
+            'breakdown' => [
+                'adults_subtotal' => round($adultTotal, 2),
+                'children_subtotal' => round($childTotal, 2),
+            ],
+            'total' => round($total, 2),
+            'currency' => 'UGX',
+        ];
     }
 
     /**
-     * Apply discount code (placeholder for future implementation)
+     * Validate payment amount matches booking total
      */
-    public function applyDiscount(float $subtotal, string $discountCode): float
+    public function validatePaymentAmount(float $paymentAmount, float $bookingTotal): bool
     {
-        // TODO: Implement discount code logic
-        return 0;
+        // Allow for small rounding differences (1 currency unit)
+        return abs($paymentAmount - $bookingTotal) < 1;
+    }
+
+    /**
+     * Calculate refund amount based on cancellation policy
+     */
+    public function calculateRefundAmount(
+        float $totalAmount,
+        Carbon $checkInDate,
+        ?Carbon $cancellationDate = null
+    ): array {
+        $cancellationDate = $cancellationDate ?? now();
+        $daysUntilCheckIn = $cancellationDate->diffInDays($checkInDate, false);
+
+        // Refund policy:
+        // - More than 7 days: 100% refund
+        // - 3-7 days: 50% refund
+        // - Less than 3 days: No refund
+
+        if ($daysUntilCheckIn > 7) {
+            $refundPercentage = 100;
+        } elseif ($daysUntilCheckIn >= 3) {
+            $refundPercentage = 50;
+        } else {
+            $refundPercentage = 0;
+        }
+
+        $refundAmount = ($totalAmount * $refundPercentage) / 100;
+
+        return [
+            'total_paid' => round($totalAmount, 2),
+            'refund_percentage' => $refundPercentage,
+            'refund_amount' => round($refundAmount, 2),
+            'days_until_checkin' => max(0, $daysUntilCheckIn),
+            'cancellation_date' => $cancellationDate->toDateString(),
+            'check_in_date' => $checkInDate->toDateString(),
+            'policy' => $this->getCancellationPolicyText($daysUntilCheckIn),
+        ];
+    }
+
+    /**
+     * Get cancellation policy text
+     */
+    private function getCancellationPolicyText(int $daysUntilCheckIn): string
+    {
+        if ($daysUntilCheckIn > 7) {
+            return 'Free cancellation - Full refund';
+        } elseif ($daysUntilCheckIn >= 3) {
+            return 'Partial refund - 50% of booking amount';
+        } else {
+            return 'No refund - Within 3 days of check-in';
+        }
     }
 }

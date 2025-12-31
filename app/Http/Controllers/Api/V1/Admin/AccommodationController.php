@@ -3,180 +3,208 @@
 namespace App\Http\Controllers\Api\V1\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\Admin\AccommodationRequest;
 use App\Http\Requests\Admin\UploadImagesRequest;
+use App\Http\Requests\Api\V1\Admin\StoreAccommodationRequest;
+use App\Http\Requests\Api\V1\Admin\UpdateAccommodationRequest;
 use App\Http\Resources\AccommodationResource;
 use App\Models\Accommodation;
 use App\Models\AccommodationImage;
+use App\Services\ImageService;
+use App\Traits\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
-use Intervention\Image\Image as InterventionImage;
+use Illuminate\Support\Facades\DB;
 
 class AccommodationController extends Controller
 {
+    use ApiResponse;
+
+    public function __construct(
+        private ImageService $imageService
+    ) {}
+
     /**
-     * List all accommodations (paginated)
+     * List all accommodations (admin view)
      */
     public function index(Request $request): JsonResponse
     {
         $query = Accommodation::with(['images', 'amenities']);
 
-        // Filter by status
-        if ($request->has('status')) {
+        // Apply filters
+        if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
 
-        // Search
-        if ($request->has('search')) {
+        if ($request->filled('search')) {
             $search = $request->search;
             $query->where(function ($q) use ($search) {
-                $q->where('name', 'like', "%{$search}%")
-                    ->orWhere('type', 'like', "%{$search}%");
+                $q->where('name', 'ilike', "%{$search}%")
+                    ->orWhere('type', 'ilike', "%{$search}%");
             });
         }
 
-        $accommodations = $query->latest()
-            ->paginate($request->get('per_page', 15));
+        $accommodations = $query->latest()->paginate($request->get('per_page', 15));
 
-        return response()->json([
-            'data' => AccommodationResource::collection($accommodations),
-            'meta' => [
-                'current_page' => $accommodations->currentPage(),
-                'last_page' => $accommodations->lastPage(),
-                'per_page' => $accommodations->perPage(),
-                'total' => $accommodations->total(),
-            ],
-        ]);
+        return $this->paginatedResponse($accommodations, AccommodationResource::class);
     }
 
     /**
      * Create accommodation
      */
-    public function store(AccommodationRequest $request): JsonResponse
+    public function store(StoreAccommodationRequest $request): JsonResponse
     {
-        $data = $request->validated();
+        try {
+            $data = $request->validated();
+            $amenityIds = $data['amenity_ids'] ?? [];
+            unset($data['amenity_ids']);
 
-        $accommodation = Accommodation::create($data);
+            DB::beginTransaction();
 
-        // Attach amenities
-        if (isset($data['amenity_ids'])) {
-            $accommodation->amenities()->sync($data['amenity_ids']);
+            $accommodation = Accommodation::create($data);
+
+            if (! empty($amenityIds)) {
+                $accommodation->amenities()->sync($amenityIds);
+            }
+
+            DB::commit();
+
+            return $this->createdResponse(
+                new AccommodationResource($accommodation->load(['images', 'amenities'])),
+                'Accommodation created successfully'
+            );
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return $this->errorResponse('Failed to create accommodation: '.$e->getMessage(), 500);
         }
+    }
 
-        return response()->json([
-            'data' => new AccommodationResource($accommodation->load(['images', 'amenities'])),
-            'message' => 'Accommodation created successfully',
-        ], 201);
+    /**
+     * Show accommodation
+     */
+    public function show(Accommodation $accommodation): JsonResponse
+    {
+        $accommodation->load([
+            'images',
+            'amenities',
+            'bookings' => function ($query) {
+                $query->latest()->limit(10);
+            },
+        ]);
+
+        return $this->resourceResponse(new AccommodationResource($accommodation), 200);
     }
 
     /**
      * Update accommodation
      */
-    public function update(AccommodationRequest $request, string $id): JsonResponse
+    public function update(UpdateAccommodationRequest $request, Accommodation $accommodation): JsonResponse
     {
-        $accommodation = Accommodation::findOrFail($id);
+        try {
+            $data = $request->validated();
+            $amenityIds = $data['amenity_ids'] ?? null;
+            unset($data['amenity_ids']);
 
-        $data = $request->validated();
-        $accommodation->update($data);
+            DB::beginTransaction();
 
-        // Sync amenities
-        if (isset($data['amenity_ids'])) {
-            $accommodation->amenities()->sync($data['amenity_ids']);
+            $accommodation->update($data);
+
+            if ($amenityIds !== null) {
+                $accommodation->amenities()->sync($amenityIds);
+            }
+
+            DB::commit();
+
+            return $this->resourceResponse(
+                new AccommodationResource($accommodation->fresh(['images', 'amenities'])),
+                'Accommodation updated successfully'
+            );
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return $this->errorResponse('Failed to update accommodation: '.$e->getMessage(), 500);
         }
-
-        return response()->json([
-            'data' => new AccommodationResource($accommodation->fresh(['images', 'amenities'])),
-            'message' => 'Accommodation updated successfully',
-        ]);
     }
 
     /**
      * Delete accommodation
      */
-    public function destroy(string $id): JsonResponse
+    public function destroy(Accommodation $accommodation): JsonResponse
     {
-        $accommodation = Accommodation::findOrFail($id);
+        $activeBookings = $accommodation->bookings()->active()->count();
 
-        // Delete images from storage
-        foreach ($accommodation->images as $image) {
-            Storage::disk('public')->delete($image->url);
-            if ($image->thumbnail_url) {
-                Storage::disk('public')->delete($image->thumbnail_url);
-            }
+        if ($activeBookings > 0) {
+            return $this->errorResponse(
+                'Cannot delete accommodation with active bookings',
+                422
+            );
         }
 
         $accommodation->delete();
 
-        return response()->json([
-            'message' => 'Accommodation deleted successfully',
-        ]);
+        return $this->successResponse(null, 'Accommodation deleted successfully');
     }
 
     /**
-     * Upload images
+     * Upload images for accommodation
      */
-    public function uploadImages(UploadImagesRequest $request, string $id): JsonResponse
+    public function uploadImages(UploadImagesRequest $request, Accommodation $accommodation): JsonResponse
     {
-        $accommodation = Accommodation::findOrFail($id);
+        try {
+            $uploadedImages = [];
+            $order = $accommodation->images()->max('order') ?? 0;
 
-        $images = [];
-        $lastOrder = $accommodation->images()->max('order') ?? 0;
+            DB::beginTransaction();
 
-        foreach ($request->file('images') as $index => $file) {
-            $filename = Str::uuid() . '.' . $file->getClientOriginalExtension();
-            $path = "accommodations/{$accommodation->id}";
+            foreach ($request->file('images') as $file) {
+                $imageData = $this->imageService->uploadImage($file, 'accommodations');
 
-            // Store original
-            $file->storeAs($path, $filename, 'public');
+                $image = $accommodation->images()->create([
+                    'url' => $imageData['url'],
+                    'thumbnail_url' => $imageData['thumbnail_url'],
+                    'order' => ++$order,
+                    'is_featured' => false,
+                ]);
 
-            // Create thumbnail
-            $thumbnailFilename = 'thumb_' . $filename;
-            $thumbnail = InterventionImage::make($file)->fit(400, 300);
-            Storage::disk('public')->put(
-                "{$path}/{$thumbnailFilename}",
-                $thumbnail->encode()
+                $uploadedImages[] = $image;
+            }
+
+            DB::commit();
+
+            return $this->successResponse(
+                $uploadedImages,
+                'Images uploaded successfully'
             );
 
-            $image = AccommodationImage::create([
-                'accommodation_id' => $accommodation->id,
-                'url' => "storage/{$path}/{$filename}",
-                'thumbnail_url' => "storage/{$path}/{$thumbnailFilename}",
-                'alt_text' => $request->alt_texts[$index] ?? null,
-                'caption' => $request->captions[$index] ?? null,
-                'order' => ++$lastOrder,
-                'is_featured' => $index === 0 && $accommodation->images()->count() === 0,
-            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
 
-            $images[] = $image;
+            return $this->errorResponse('Failed to upload images: '.$e->getMessage(), 500);
         }
-
-        return response()->json([
-            'data' => $images,
-            'message' => 'Images uploaded successfully',
-        ], 201);
     }
 
     /**
-     * Delete image
+     * Delete accommodation image
      */
-    public function deleteImage(string $id, string $imageId): JsonResponse
+    public function deleteImage(Accommodation $accommodation, AccommodationImage $image): JsonResponse
     {
-        $accommodation = Accommodation::findOrFail($id);
-        $image = AccommodationImage::where('accommodation_id', $id)
-            ->findOrFail($imageId);
-
-        // Delete from storage
-        Storage::disk('public')->delete($image->url);
-        if ($image->thumbnail_url) {
-            Storage::disk('public')->delete($image->thumbnail_url);
+        if ($image->accommodation_id !== $accommodation->id) {
+            return $this->errorResponse(
+                'Image does not belong to this accommodation',
+                422
+            );
         }
 
-        $image->delete();
+        try {
+            $this->imageService->deleteImage($image->url, $image->thumbnail_url);
+            $image->delete();
 
-        return response()->json([
-            'message' => 'Image deleted successfully',
-        ]);
+            return $this->successResponse(null, 'Image deleted successfully');
+
+        } catch (\Exception $e) {
+            return $this->errorResponse('Failed to delete image: '.$e->getMessage(), 500);
+        }
     }
 }

@@ -6,6 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Models\Booking;
 use App\Models\User;
 use App\Models\Accommodation;
+use App\Services\BookingService;
+use App\Services\DashboardService;
+use App\Traits\ApiResponse;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -13,6 +16,14 @@ use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller
 {
+    use ApiResponse;
+
+    public function __construct(
+        private DashboardService $dashboardService,
+        private BookingService $bookingService
+    ) {}
+
+
     /**
      * Get dashboard statistics
      */

@@ -9,6 +9,7 @@ enum PaymentStatus: string
     case PARTIALLY_PAID = 'partially_paid';
     case REFUNDED = 'refunded';
     case FAILED = 'failed';
+    case COMPLETED = 'completed';
 
     public function label(): string
     {
@@ -18,6 +19,7 @@ enum PaymentStatus: string
             self::PARTIALLY_PAID => 'Partially Paid',
             self::REFUNDED => 'Refunded',
             self::FAILED => 'Failed',
+            self::COMPLETED => 'Completed',
         };
     }
 
@@ -34,5 +36,25 @@ enum PaymentStatus: string
     public function needsPayment(): bool
     {
         return in_array($this, [self::PENDING, self::PARTIALLY_PAID, self::FAILED]);
+    }
+
+    public function isRefunded(): bool
+    {
+        return $this === self::REFUNDED;
+    }
+
+    public function isCompleted(): bool
+    {
+        return $this === self::COMPLETED;
+    }
+
+    public function isFailed(): bool
+    {
+        return $this === self::FAILED;
+    }
+
+    public function isPending(): bool
+    {
+        return $this === self::PENDING;
     }
 }
