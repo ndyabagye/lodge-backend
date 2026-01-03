@@ -13,6 +13,7 @@ use App\Notifications\BookingNotification;
 use App\Notifications\BookingConfirmation;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
 
 class BookingService
@@ -143,7 +144,7 @@ class BookingService
             $booking->update($data);
         });
 
-        return $booking->fresh(['accommodation.images', 'user']);
+        return $booking->refresh(['accommodation.images', 'user']);
     }
 
     /**
@@ -160,7 +161,7 @@ class BookingService
                 ->notify(new BookingConfirmation($booking));
         }
 
-        return $booking->fresh();
+        return $booking->refresh();
     }
 
     /**
@@ -196,7 +197,7 @@ class BookingService
         });
 
         return [
-            'booking' => $booking->fresh(),
+            'booking' => $booking->refresh(),
             'refund_info' => $refundInfo,
         ];
     }

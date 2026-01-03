@@ -114,6 +114,7 @@ class ActivityController extends Controller
                 $imageData = $this->imageService->uploadImage($file, 'activities');
 
                 $image = $activity->images()->create([
+                    'activity_id' => $activity->id,
                     'url' => $imageData['url'],
                     'thumbnail_url' => $imageData['thumbnail_url'],
                     'order' => ++$order,

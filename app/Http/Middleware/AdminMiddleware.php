@@ -10,13 +10,11 @@ class AdminMiddleware
 {
     public function handle(Request $request, Closure $next): Response
     {
-        if (!$request->user() || (!$request->user()->isAdmin() && !$request->user()->isStaff())) {
+        if (! $request->user() || (! $request->user()->isAdmin() && ! $request->user()->isStaff())) {
             return response()->json([
                 'message' => 'Unauthorized. Admin or staff access required.',
             ], 403);
         }
-
         return $next($request);
     }
 }
-

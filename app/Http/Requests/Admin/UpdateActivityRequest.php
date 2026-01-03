@@ -11,7 +11,7 @@ class UpdateActivityRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return $this->user()->isStaff();
+        return $this->user()?->isAdmin() || $this->user()?->isStaff();
     }
 
     public function rules(): array

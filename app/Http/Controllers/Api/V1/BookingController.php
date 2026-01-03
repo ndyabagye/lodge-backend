@@ -15,6 +15,7 @@ use App\Services\BookingService;
 use App\Services\PricingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Validator;
 
 class BookingController extends Controller
 {
@@ -74,7 +75,7 @@ class BookingController extends Controller
     }
 
     /**
-     * Get single booking
+     * Get single booking (authenticated users only)
      */
     public function show(Request $request, Booking $booking): JsonResponse
     {
@@ -85,7 +86,95 @@ class BookingController extends Controller
 
         $booking->load(['accommodation.images', 'payments', 'user']);
 
-        return $this->resourceResponse(new BookingResource($booking));
+        return $this->resourceResponse(new BookingResource($booking), 200);
+    }
+
+    /**
+     * ====================================================================
+     * GUEST BOOKING METHODS (No authentication required)
+     * Access via booking_number + email verification
+     * ====================================================================
+     */
+
+    /**
+     * Show guest booking (verify with email)
+     */
+    public function showGuestBooking(Request $request, string $bookingNumber): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'email' => 'required|email',
+        ]);
+
+        if ($validator->fails()) {
+            return $this->validationErrorResponse($validator->errors()->toArray());
+        }
+
+        $booking = Booking::where('booking_number', $bookingNumber)
+            ->where('guest_email', $request->email)
+            ->first();
+
+        if (!$booking) {
+            return $this->notFoundResponse('Booking not found or email does not match');
+        }
+
+        $booking->load(['accommodation.images', 'payments']);
+
+        return $this->resourceResponse(
+            new BookingResource($booking),
+            'Booking retrieved successfully'
+        );
+    }
+
+    /**
+     * Preview guest invoice
+     */
+    public function previewGuestInvoice(Request $request, string $bookingNumber)
+    {
+        $validator = Validator::make($request->all(), [
+            'email' => 'required|email',
+        ]);
+
+        if ($validator->fails()) {
+            return $this->validationErrorResponse($validator->errors()->toArray());
+        }
+
+        $booking = Booking::where('booking_number', $bookingNumber)
+            ->where('guest_email', $request->email)
+            ->first();
+
+        if (!$booking) {
+            return $this->notFoundResponse('Booking not found or email does not match');
+        }
+
+        $invoiceService = app(\App\Services\InvoiceService::class);
+
+        return $invoiceService->previewInvoice($booking);
+    }
+
+    /**
+     * Download guest invoice (PDF)
+     */
+    public function downloadGuestInvoice(Request $request, string $bookingNumber)
+    {
+        $validator = Validator::make($request->all(), [
+            'email' => 'required|email',
+        ]);
+
+        if ($validator->fails()) {
+            return $this->validationErrorResponse($validator->errors()->toArray());
+        }
+
+        $booking = Booking::where('booking_number', $bookingNumber)
+            ->where('guest_email', $request->email)
+            ->first();
+
+        if (!$booking) {
+            return $this->notFoundResponse('Booking not found or email does not match');
+        }
+
+        $invoiceService = app(\App\Services\InvoiceService::class);
+
+        return $invoiceService->downloadInvoice($booking);
     }
 
     /**
@@ -168,7 +257,7 @@ class BookingController extends Controller
             ],
             'availability' => $availability,
             'pricing' => $pricing,
-        ]);
+        ], 200);
     }
 
     /**

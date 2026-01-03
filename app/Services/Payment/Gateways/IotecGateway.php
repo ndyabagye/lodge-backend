@@ -7,7 +7,7 @@ use App\DTOs\PaymentResponse;
 use App\Models\Payment;
 use App\Services\Payment\AbstractPaymentGateway;
 
-class IoTecGateway extends AbstractPaymentGateway
+class IotecGateway extends AbstractPaymentGateway
 {
     public function __construct()
     {

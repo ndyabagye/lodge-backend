@@ -3,14 +3,16 @@
 namespace App\Http\Requests\Admin;
 
 use App\Enums\AccommodationStatus;
+use App\Models\Accommodation;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Enum;
 
 class StoreAccommodationRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return $this->user()->isStaff();
+        return $this->user()?->isAdmin() || $this->user()?->isStaff();
     }
 
     public function rules(): array
@@ -55,17 +57,30 @@ class StoreAccommodationRequest extends FormRequest
     protected function prepareForValidation(): void
     {
         // Add default check-in/out times if not provided
-        if (!$this->has('check_in_time')) {
+        if (! $this->has('check_in_time')) {
             $this->merge(['check_in_time' => '14:00']);
         }
 
-        if (!$this->has('check_out_time')) {
+        if (! $this->has('check_out_time')) {
             $this->merge(['check_out_time' => '11:00']);
         }
 
         // Default minimum stay
-        if (!$this->has('minimum_stay')) {
+        if (! $this->has('minimum_stay')) {
             $this->merge(['minimum_stay' => 1]);
+        }
+
+        // Generate slug from name if not provided
+        if (! $this->has('slug') && $this->has('name')) {
+            $slug = Str::slug($this->name);
+
+            // Ensure slug is unique
+            $count = Accommodation::where('slug', 'like', $slug.'%')->count();
+            if ($count > 0) {
+                $slug .= '-'.($count + 1);
+            }
+
+            $this->merge(['slug' => $slug]);
         }
     }
 }

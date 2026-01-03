@@ -12,7 +12,7 @@ use App\Models\Booking;
 use App\Models\Payment;
 use App\Notifications\PaymentReceived;
 use App\Services\Payment\Gateways\FlutterwaveGateway;
-use App\Services\Payment\Gateways\IoTecGateway;
+use App\Services\Payment\Gateways\IotecGateway;
 use App\Services\Payment\Gateways\PesapalGateway;
 use App\Services\Payment\Gateways\StripeGateway;
 use Illuminate\Support\Facades\DB;
@@ -29,7 +29,7 @@ class PaymentService
         $this->registerGateway('stripe', new StripeGateway);
         $this->registerGateway('flutterwave', new FlutterwaveGateway);
         $this->registerGateway('pesapal', new PesapalGateway);
-        $this->registerGateway('iotec', new IoTecGateway);
+        $this->registerGateway('iotec', new IotecGateway);
     }
 
     /**
@@ -163,7 +163,7 @@ class PaymentService
                 'status' => $status->value,
             ]);
 
-            return $payment->fresh('booking');
+            return $payment->refresh('booking');
         });
     }
 
@@ -241,7 +241,7 @@ class PaymentService
                 'reason' => $reason,
             ]);
 
-            return $payment->fresh('booking');
+            return $payment->refresh('booking');
         });
     }
 

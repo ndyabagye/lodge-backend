@@ -3,9 +3,9 @@
 namespace App\Http\Controllers\Api\V1\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\StoreAccommodationRequest;
+use App\Http\Requests\Admin\UpdateAccommodationRequest;
 use App\Http\Requests\Admin\UploadImagesRequest;
-use App\Http\Requests\Api\V1\Admin\StoreAccommodationRequest;
-use App\Http\Requests\Api\V1\Admin\UpdateAccommodationRequest;
 use App\Http\Resources\AccommodationResource;
 use App\Models\Accommodation;
 use App\Models\AccommodationImage;
@@ -162,6 +162,7 @@ class AccommodationController extends Controller
                 $imageData = $this->imageService->uploadImage($file, 'accommodations');
 
                 $image = $accommodation->images()->create([
+                    'accommodation_id' => $accommodation->id,
                     'url' => $imageData['url'],
                     'thumbnail_url' => $imageData['thumbnail_url'],
                     'order' => ++$order,
@@ -190,6 +191,12 @@ class AccommodationController extends Controller
      */
     public function deleteImage(Accommodation $accommodation, AccommodationImage $image): JsonResponse
     {
+
+        // \Log::info('Image debug:', [
+        //     'accommodation_id' => $accommodation->id,
+        //     'image_id' => $image->accommodation_id,
+        // ]);
+
         if ($image->accommodation_id !== $accommodation->id) {
             return $this->errorResponse(
                 'Image does not belong to this accommodation',

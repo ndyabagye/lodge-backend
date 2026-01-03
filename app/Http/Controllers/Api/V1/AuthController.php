@@ -57,13 +57,13 @@ class AuthController extends Controller
 
         $token = $user->createToken('auth-token')->plainTextToken;
 
-        return $this->createdResponse(
-            [
+        return response()->json([
+            'message' => 'Registration successful. Please check your email to verify your account.',
+            'data' => [
                 'user' => new UserResource($user->load('preferences')),
                 'token' => $token,
             ],
-            'Registration successful. Please check your email to verify your account.'
-        );
+        ]);
     }
 
     /**

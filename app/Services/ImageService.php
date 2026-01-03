@@ -5,8 +5,8 @@ namespace App\Services;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use Intervention\Image\ImageManager;
 use Intervention\Image\Drivers\Gd\Driver;
+use Intervention\Image\ImageManager;
 
 class ImageService
 {
@@ -15,7 +15,7 @@ class ImageService
     public function __construct()
     {
         // Initialize Intervention Image with GD driver
-        $this->manager = new ImageManager(new Driver());
+        $this->manager = new ImageManager(new Driver);
     }
 
     /**
@@ -24,16 +24,16 @@ class ImageService
     public function uploadImage(UploadedFile $file, string $directory = 'accommodations'): array
     {
         // Generate unique filename
-        $filename = Str::uuid() . '.' . $file->getClientOriginalExtension();
-        $path = "{$directory}/{$filename}";
-        $thumbnailPath = "{$directory}/thumbnails/{$filename}";
+        $filename = Str::uuid().'.'.$file->getClientOriginalExtension();
+        // Store original image (public disk)
+        $path = $file->storeAs($directory, $filename, 'public');
 
-        // Store original image
-        $storedPath = $file->storeAs('public/' . $directory, $filename);
-
-        if (!$storedPath) {
+        if (! $path) {
             throw new \Exception('Failed to store image');
         }
+
+        // Thumbnail path
+        $thumbnailPath = "{$directory}/thumbnails/{$filename}";
 
         // Create thumbnail
         try {
@@ -43,11 +43,11 @@ class ImageService
             $image->cover(400, 300);
 
             // Save thumbnail
-            $thumbnailFullPath = storage_path('app/public/' . $thumbnailPath);
+            $thumbnailFullPath = storage_path('app/public/'.$thumbnailPath);
 
             // Ensure thumbnails directory exists
             $thumbnailDir = dirname($thumbnailFullPath);
-            if (!is_dir($thumbnailDir)) {
+            if (! is_dir($thumbnailDir)) {
                 mkdir($thumbnailDir, 0755, true);
             }
 
@@ -133,9 +133,9 @@ class ImageService
     public function optimizeImage(string $path, int $quality = 85): bool
     {
         try {
-            $fullPath = storage_path('app/public/' . str_replace('public/', '', $path));
+            $fullPath = storage_path('app/public/'.str_replace('public/', '', $path));
 
-            if (!file_exists($fullPath)) {
+            if (! file_exists($fullPath)) {
                 return false;
             }
 
@@ -160,9 +160,9 @@ class ImageService
     public function resizeImage(string $path, int $width, int $height, bool $maintainAspectRatio = true): bool
     {
         try {
-            $fullPath = storage_path('app/public/' . str_replace('public/', '', $path));
+            $fullPath = storage_path('app/public/'.str_replace('public/', '', $path));
 
-            if (!file_exists($fullPath)) {
+            if (! file_exists($fullPath)) {
                 return false;
             }
 
@@ -194,9 +194,9 @@ class ImageService
     public function getImageDimensions(string $path): ?array
     {
         try {
-            $fullPath = storage_path('app/public/' . str_replace('public/', '', $path));
+            $fullPath = storage_path('app/public/'.str_replace('public/', '', $path));
 
-            if (!file_exists($fullPath)) {
+            if (! file_exists($fullPath)) {
                 return null;
             }
 
@@ -223,10 +223,10 @@ class ImageService
     public function addWatermark(string $path, string $watermarkPath, string $position = 'bottom-right'): bool
     {
         try {
-            $fullPath = storage_path('app/public/' . str_replace('public/', '', $path));
-            $fullWatermarkPath = storage_path('app/public/' . str_replace('public/', '', $watermarkPath));
+            $fullPath = storage_path('app/public/'.str_replace('public/', '', $path));
+            $fullWatermarkPath = storage_path('app/public/'.str_replace('public/', '', $watermarkPath));
 
-            if (!file_exists($fullPath) || !file_exists($fullWatermarkPath)) {
+            if (! file_exists($fullPath) || ! file_exists($fullWatermarkPath)) {
                 return false;
             }
 
@@ -234,7 +234,7 @@ class ImageService
             $watermark = $this->manager->read($fullWatermarkPath);
 
             // Resize watermark to 20% of image width
-            $watermarkWidth = (int)($image->width() * 0.2);
+            $watermarkWidth = (int) ($image->width() * 0.2);
             $watermark->scale(width: $watermarkWidth);
 
             // Position watermark
