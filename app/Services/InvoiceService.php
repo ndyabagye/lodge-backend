@@ -99,14 +99,16 @@ class InvoiceService
      */
     private function getInvoiceItems(Booking $booking): array
     {
+        $nights = $booking->getNumberOfNights();
+
         $items = [];
 
         // Accommodation charges
         $items[] = [
             'description' => $booking->accommodation->name,
-            'details' => "{$booking->nights} night(s) - Check-in: {$booking->check_in_date->format('M d, Y')}, Check-out: {$booking->check_out_date->format('M d, Y')}",
-            'quantity' => $booking->nights,
-            'unit_price' => $booking->subtotal / $booking->nights,
+            'details' => "{$nights} night(s) - Check-in: {$booking->check_in_date->format('M d, Y')}, Check-out: {$booking->check_out_date->format('M d, Y')}",
+            'quantity' => $nights,
+            'unit_price' => $booking->subtotal / $nights,
             'amount' => $booking->subtotal,
         ];
 

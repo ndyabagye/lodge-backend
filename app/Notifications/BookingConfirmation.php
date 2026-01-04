@@ -34,15 +34,18 @@ class BookingConfirmation extends Notification
      */
     public function toMail(object $notifiable): MailMessage
     {
+        // Handle both User models and AnonymousNotifiable (guest emails)
+        $firstName = $this->getFirstName($notifiable);
+
         return (new MailMessage)
             ->subject('Booking Confirmation - ' . $this->booking->booking_number)
-            ->greeting('Hello ' . $notifiable->first_name . '!')
+            ->greeting('Hello ' . $firstName . '!')
             ->line('Your booking has been confirmed.')
             ->line('Booking Number: ' . $this->booking->booking_number)
             ->line('Accommodation: ' . $this->booking->accommodation->name)
             ->line('Check-in: ' . $this->booking->check_in_date->format('M d, Y'))
             ->line('Check-out: ' . $this->booking->check_out_date->format('M d, Y'))
-            ->line('Total Amount: UGX ' . number_format($this->booking->total_amount))
+            ->line('Total Amount: ZMW ' . number_format($this->booking->total_amount))
             ->action('View Booking', url('/bookings/' . $this->booking->id))
             ->line('Thank you for choosing our lodge!');
     }
@@ -61,5 +64,24 @@ class BookingConfirmation extends Notification
             'check_in_date' => $this->booking->check_in_date->format('Y-m-d'),
             'total_amount' => $this->booking->total_amount,
         ];
+    }
+
+    /**
+     * Get the first name from notifiable
+     */
+    private function getFirstName(object $notifiable): string
+    {
+        // If it's a User model with first_name property
+        if (property_exists($notifiable, 'first_name') && $notifiable->first_name) {
+            return $notifiable->first_name;
+        }
+
+        // If it's an AnonymousNotifiable (guest), use guest info from booking
+        if ($this->booking->guest_first_name) {
+            return $this->booking->guest_first_name;
+        }
+
+        // Fallback
+        return 'Guest';
     }
 }

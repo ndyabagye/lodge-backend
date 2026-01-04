@@ -233,8 +233,8 @@ class BookingController extends Controller
 
         $availability = $this->availabilityService->checkAvailability(
             $accommodation,
-            $request->check_in_date,
-            $request->check_out_date
+            $request->start_date,
+            $request->end_date
         );
 
         if (! $availability['available']) {
@@ -243,8 +243,8 @@ class BookingController extends Controller
 
         $pricing = $this->pricingService->calculateBookingPrice(
             $accommodation,
-            $request->check_in_date,
-            $request->check_out_date,
+            $request->start_date,
+            $request->end_date,
             $request->input('discount', 0)
         );
 

@@ -2,14 +2,13 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
-use Illuminate\Database\Eloquent\Builder;
 
 /**
  * @mixin IdeHelperAccommodation
@@ -19,65 +18,72 @@ class Accommodation extends Model
     use HasFactory, HasUuids, SoftDeletes;
 
     protected $fillable = [
-        "name",
-        "slug",
-        "type",
-        "description",
-        "short_description",
-        "max_guests",
-        "num_bedrooms",
-        "num_bathrooms",
-        "num_beds",
-        "size_sqft",
-        "base_price",
-        "weekend_price",
-        "cleaning_fee",
-        "minimum_stay",
-        "maximum_stay",
-        "check_in_time",
-        "check_out_time",
-        "status",
-        "featured",
-        "rating",
-        "views",
-        "bookings",
+        'name',
+        'slug',
+        'type',
+        'description',
+        'short_description',
+        'max_guests',
+        'num_bedrooms',
+        'num_bathrooms',
+        'num_beds',
+        'size_sqft',
+        'base_price',
+        'weekend_price',
+        'cleaning_fee',
+        'minimum_stay',
+        'maximum_stay',
+        'check_in_time',
+        'check_out_time',
+        'status',
+        'featured',
+        'rating',
+        'views',
+        'bookings',
     ];
 
     protected function casts(): array
     {
         return [
-            "base_price" => "decimal:2",
-            "weekend_price" => "decimal:2",
-            "cleaning_fee" => "decimal:2",
-            "rating" => "decimal:2",
-            "featured" => "boolean",
-            "check_in_time" => "datetime:H:i",
-            "check_out_time" => "datetime:H:i",
+            'base_price' => 'decimal:2',
+            'weekend_price' => 'decimal:2',
+            'cleaning_fee' => 'decimal:2',
+            'rating' => 'decimal:2',
+            'featured' => 'boolean',
+            'check_in_time' => 'datetime:H:i',
+            'check_out_time' => 'datetime:H:i',
         ];
     }
 
     /**
+     * Determine if the accommodation is available for booking.
+     */
+    public function isAvailable(): bool
+    {
+        return $this->status === 'available';
+    }
+
+    /**
      * Get the images associated with the accommodation.
-     * @return \Illuminate\Database\Eloquent\Relations\HasMany
      */
     public function images(): HasMany
     {
-        return $this->hasMany(AccommodationImage::class)->orderBy("order");
+        return $this->hasMany(AccommodationImage::class)->orderBy('order');
     }
 
     /**
      * Get the featured image associated with the accommodation.
-     * @return \Illuminate\Database\Eloquent\Relations\HasMany
      */
     public function featuredImage(): HasMany
     {
         return $this->hasMany(AccommodationImage::class)
-            ->where("is_featured", true)
+            ->where('is_featured', true)
             ->limit(1);
     }
 
     /**
      * Get the amenities associated with the accommodation.
+     *
      * @return \Illuminate\Database\Eloquent\Relations\BelongsTo
      */
     public function amenities(): BelongsToMany
@@ -87,7 +93,6 @@ class Accommodation extends Model
 
     /**
      * Get the bookings associated with the accommodation.
-     * @return \Illuminate\Database\Eloquent\Relations\HasMany
      */
     public function bookings(): HasMany
     {
@@ -96,7 +101,6 @@ class Accommodation extends Model
 
     /**
      * Get the blocked dates associated with the accommodation.
-     * @return \Illuminate\Database\Eloquent\Relations\HasMany
      */
     public function blockedDates(): HasMany
     {
@@ -105,7 +109,6 @@ class Accommodation extends Model
 
     /**
      * Get the reviews associated with the accommodation.
-     * @return \Illuminate\Database\Eloquent\Relations\HasMany
      */
     public function reviews(): HasMany
     {
@@ -117,7 +120,7 @@ class Accommodation extends Model
      */
     public function incrementViews(): void
     {
-        $this->increment("views");
+        $this->increment('views');
     }
 
     /**
@@ -125,7 +128,7 @@ class Accommodation extends Model
      */
     public function incrementBookings(): void
     {
-        $this->increment("bookings");
+        $this->increment('bookings');
     }
 
     /**
@@ -134,29 +137,31 @@ class Accommodation extends Model
     public function updateRating(): void
     {
         $avgRating = $this->reviews()
-            ->where("status", "approved")
-            ->avg("rating");
+            ->where('status', 'approved')
+            ->avg('rating');
 
-        $this->update(["rating" => round($avgRating, 2)]);
+        $this->update(['rating' => round($avgRating, 2)]);
     }
 
     /**
      * Scope query to get featured accommodations.
+     *
      * @param  Builder<static>  $query
      * @return Builder<static>
      */
     public function scopeFeatured($query)
     {
-        return $query->where("featured", true);
+        return $query->where('featured', true);
     }
 
     /**
      * Scope query to get available accommodations.
+     *
      * @param  Builder<static>  $query
      * @return Builder<static>
      */
     public function scopeAvailable($query)
     {
-        return $query->where("status", "available");
+        return $query->where('status', 'available');
     }
 }
