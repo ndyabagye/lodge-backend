@@ -273,8 +273,8 @@
                             <div class="item-details">{{ $item['details'] }}</div>
                         </td>
                         <td class="text-center">{{ $item['quantity'] }}</td>
-                        <td class="text-right">UGX {{ number_format($item['unit_price'], 2) }}</td>
-                        <td class="text-right">UGX {{ number_format($item['amount'], 2) }}</td>
+                        <td class="text-right">ZMW {{ number_format($item['unit_price'], 2) }}</td>
+                        <td class="text-right">ZMW {{ number_format($item['amount'], 2) }}</td>
                     </tr>
                     @endforeach
                 </tbody>
@@ -285,21 +285,21 @@
         <table class="totals-table">
             <tr>
                 <td>Subtotal:</td>
-                <td class="text-right">UGX {{ number_format($totals['subtotal'], 2) }}</td>
+                <td class="text-right">ZMW {{ number_format($totals['subtotal'], 2) }}</td>
             </tr>
             @if($totals['discount'] > 0)
             <tr>
                 <td>Discount:</td>
-                <td class="text-right">- UGX {{ number_format($totals['discount'], 2) }}</td>
+                <td class="text-right">- ZMW {{ number_format($totals['discount'], 2) }}</td>
             </tr>
             @endif
             <tr>
                 <td>Tax (18%):</td>
-                <td class="text-right">UGX {{ number_format($totals['tax'], 2) }}</td>
+                <td class="text-right">ZMW {{ number_format($totals['tax'], 2) }}</td>
             </tr>
             <tr class="total-row">
                 <td>TOTAL:</td>
-                <td class="text-right">UGX {{ number_format($totals['total'], 2) }}</td>
+                <td class="text-right">ZMW {{ number_format($totals['total'], 2) }}</td>
             </tr>
             <tr>
                 <td>Payment Status:</td>
@@ -328,4 +328,3 @@
     </div>
 </body>
 </html>
-<?php

@@ -31,7 +31,7 @@
 
         <div class="amount-box">
             <div class="amount-label">AMOUNT PAID</div>
-            <div class="amount-value">UGX {{ number_format($payment->amount, 2) }}</div>
+            <div class="amount-value">ZMW {{ number_format($payment->amount, 2) }}</div>
         </div>
 
         <div class="section">

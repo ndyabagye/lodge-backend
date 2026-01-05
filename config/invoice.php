@@ -1,10 +1,10 @@
 <?php
 
 return [
-    'company' => [
-        'name' => env('COMPANY_NAME', 'Lodge Booking System'),
-        'address' => env('COMPANY_ADDRESS', 'Plot 123, Kampala Road, Kampala, Uganda'),
-        'phone' => env('COMPANY_PHONE', '+256 700 000000'),
-        'email' => env('COMPANY_EMAIL', 'info@lodgebooking.com'),
+    "company" => [
+        "name" => env("COMPANY_NAME", "Villa Mbanandi Lodge"),
+        "address" => env("COMPANY_ADDRESS", "Lusaka, Zambia"),
+        "phone" => env("COMPANY_PHONE", "+256 700 000000"),
+        "email" => env("COMPANY_EMAIL", "info@lodgebooking.com"),
     ],
 ];

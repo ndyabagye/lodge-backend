@@ -15,7 +15,7 @@ return new class extends Migration {
             $table->foreignUuid("booking_id")->constrained()->cascadeOnDelete();
             $table->string("transaction_id")->unique()->nullable();
             $table->decimal("amount", 10, 2);
-            $table->string("currency", 3)->default("UGX");
+            $table->string("currency", 3)->default("ZMW");
             $table->string("payment_method")->nullable();
             $table->string("payment_gateway")->nullable();
             $table

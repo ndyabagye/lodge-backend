@@ -26,17 +26,19 @@ class PaymentService
     public function __construct()
     {
         // Register available gateways
-        $this->registerGateway('stripe', new StripeGateway);
-        $this->registerGateway('flutterwave', new FlutterwaveGateway);
-        $this->registerGateway('pesapal', new PesapalGateway);
-        $this->registerGateway('iotec', new IotecGateway);
+        $this->registerGateway("stripe", new StripeGateway());
+        $this->registerGateway("flutterwave", new FlutterwaveGateway());
+        $this->registerGateway("pesapal", new PesapalGateway());
+        $this->registerGateway("iotec", new IotecGateway());
     }
 
     /**
      * Register a payment gateway
      */
-    private function registerGateway(string $name, PaymentGatewayInterface $gateway): void
-    {
+    private function registerGateway(
+        string $name,
+        PaymentGatewayInterface $gateway,
+    ): void {
         if ($gateway->isAvailable()) {
             $this->gateways[$name] = $gateway;
         }
@@ -47,8 +49,10 @@ class PaymentService
      */
     public function getGateway(string $name): PaymentGatewayInterface
     {
-        if (! isset($this->gateways[$name])) {
-            throw PaymentException::gatewayError("Gateway '{$name}' is not available or configured");
+        if (!isset($this->gateways[$name])) {
+            throw PaymentException::gatewayError(
+                "Gateway '{$name}' is not available or configured",
+            );
         }
 
         return $this->gateways[$name];
@@ -65,8 +69,10 @@ class PaymentService
     /**
      * Initialize payment for a booking
      */
-    public function initializePayment(Booking $booking, string $gatewayName): array
-    {
+    public function initializePayment(
+        Booking $booking,
+        string $gatewayName,
+    ): array {
         return DB::transaction(function () use ($booking, $gatewayName) {
             // Check if booking is already paid
             if ($booking->payment_status === PaymentStatusEnum::PAID) {
@@ -82,35 +88,37 @@ class PaymentService
             // Initialize payment with gateway
             $response = $gateway->initializePayment($paymentRequest);
 
-            if (! $response->success) {
-                throw PaymentException::failed($response->message ?? 'Payment initialization failed');
+            if (!$response->success) {
+                throw PaymentException::failed(
+                    $response->message ?? "Payment initialization failed",
+                );
             }
 
             // Create payment record
             $payment = Payment::create([
-                'booking_id' => $booking->id,
-                'transaction_id' => $response->transactionId,
-                'amount' => $booking->total_amount,
-                'currency' => 'UGX',
-                'payment_method' => $booking->payment_method,
-                'payment_gateway' => $gatewayName,
-                'status' => PaymentStatusEnum::PENDING,
-                'metadata' => [
-                    'reference' => $response->reference,
-                    'gateway_response' => $response->data,
+                "booking_id" => $booking->id,
+                "transaction_id" => $response->transactionId,
+                "amount" => $booking->total_amount,
+                "currency" => "ZMW",
+                "payment_method" => $booking->payment_method,
+                "payment_gateway" => $gatewayName,
+                "status" => PaymentStatusEnum::PENDING,
+                "metadata" => [
+                    "reference" => $response->reference,
+                    "gateway_response" => $response->data,
                 ],
             ]);
 
-            Log::info('Payment initialized', [
-                'booking_id' => $booking->id,
-                'payment_id' => $payment->id,
-                'gateway' => $gatewayName,
+            Log::info("Payment initialized", [
+                "booking_id" => $booking->id,
+                "payment_id" => $payment->id,
+                "gateway" => $gatewayName,
             ]);
 
             return [
-                'payment' => $payment,
-                'authorization_url' => $response->authorizationUrl,
-                'reference' => $response->reference,
+                "payment" => $payment,
+                "authorization_url" => $response->authorizationUrl,
+                "reference" => $response->reference,
             ];
         });
     }
@@ -118,34 +126,44 @@ class PaymentService
     /**
      * Verify payment
      */
-    public function verifyPayment(string $reference, string $gatewayName): Payment
-    {
+    public function verifyPayment(
+        string $reference,
+        string $gatewayName,
+    ): Payment {
         return DB::transaction(function () use ($reference, $gatewayName) {
             $gateway = $this->getGateway($gatewayName);
 
             // Verify with gateway
             $response = $gateway->verifyPayment($reference);
 
-            if (! $response->success) {
-                throw PaymentException::failed($response->message ?? 'Payment verification failed');
+            if (!$response->success) {
+                throw PaymentException::failed(
+                    $response->message ?? "Payment verification failed",
+                );
             }
 
             // Find payment by reference
-            $payment = Payment::whereJsonContains('metadata->reference', $reference)->firstOrFail();
+            $payment = Payment::whereJsonContains(
+                "metadata->reference",
+                $reference,
+            )->firstOrFail();
 
             // Map gateway status to internal status
             $status = match (strtolower($response->status)) {
-                'completed', 'success', 'successful' => PaymentStatusEnum::COMPLETED,
-                'failed', 'declined' => PaymentStatusEnum::FAILED,
+                "completed",
+                "success",
+                "successful"
+                    => PaymentStatusEnum::COMPLETED,
+                "failed", "declined" => PaymentStatusEnum::FAILED,
                 default => PaymentStatusEnum::PENDING,
             };
 
             // Update payment
             $payment->update([
-                'status' => $status,
-                'metadata' => array_merge($payment->metadata ?? [], [
-                    'verification_response' => $response->data,
-                    'verified_at' => now()->toISOString(),
+                "status" => $status,
+                "metadata" => array_merge($payment->metadata ?? [], [
+                    "verification_response" => $response->data,
+                    "verified_at" => now()->toISOString(),
                 ]),
             ]);
 
@@ -154,16 +172,16 @@ class PaymentService
                 $this->handleSuccessfulPayment($payment);
             } elseif ($status === PaymentStatusEnum::FAILED) {
                 $payment->booking->update([
-                    'payment_status' => PaymentStatusEnum::FAILED,
+                    "payment_status" => PaymentStatusEnum::FAILED,
                 ]);
             }
 
-            Log::info('Payment verified', [
-                'payment_id' => $payment->id,
-                'status' => $status->value,
+            Log::info("Payment verified", [
+                "payment_id" => $payment->id,
+                "status" => $status->value,
             ]);
 
-            return $payment->refresh('booking');
+            return $payment->refresh("booking");
         });
     }
 
@@ -176,18 +194,19 @@ class PaymentService
 
         // Update booking payment status
         $booking->update([
-            'payment_status' => PaymentStatusEnum::PAID,
-            'status' => BookingStatus::CONFIRMED,
+            "payment_status" => PaymentStatusEnum::PAID,
+            "status" => BookingStatus::CONFIRMED,
         ]);
 
         // Send payment confirmation email
-        Notification::route('mail', $booking->guest_email)
-            ->notify(new PaymentReceived($payment));
+        Notification::route("mail", $booking->guest_email)->notify(
+            new PaymentReceived($payment),
+        );
 
-        Log::info('Payment completed', [
-            'booking_id' => $booking->id,
-            'payment_id' => $payment->id,
-            'amount' => $payment->amount,
+        Log::info("Payment completed", [
+            "booking_id" => $booking->id,
+            "payment_id" => $payment->id,
+            "amount" => $payment->amount,
         ]);
     }
 
@@ -197,16 +216,20 @@ class PaymentService
     public function processRefund(
         Payment $payment,
         float $amount,
-        ?string $reason = null
+        ?string $reason = null,
     ): Payment {
         return DB::transaction(function () use ($payment, $amount, $reason) {
             // Validate refund
-            if (! $payment->isCompleted()) {
-                throw PaymentException::failed('Cannot refund a payment that is not completed');
+            if (!$payment->isCompleted()) {
+                throw PaymentException::failed(
+                    "Cannot refund a payment that is not completed",
+                );
             }
 
             if ($amount > $payment->amount) {
-                throw PaymentException::invalidAmount('Refund amount cannot exceed payment amount');
+                throw PaymentException::invalidAmount(
+                    "Refund amount cannot exceed payment amount",
+                );
             }
 
             // Get gateway
@@ -215,33 +238,35 @@ class PaymentService
             // Process refund
             $response = $gateway->refund($payment, $amount, $reason);
 
-            if (! $response->success) {
-                throw PaymentException::failed($response->message ?? 'Refund failed');
+            if (!$response->success) {
+                throw PaymentException::failed(
+                    $response->message ?? "Refund failed",
+                );
             }
 
             // Update payment
             $payment->update([
-                'status' => PaymentStatusEnum::REFUNDED,
-                'metadata' => array_merge($payment->metadata ?? [], [
-                    'refund_response' => $response->data,
-                    'refund_amount' => $amount,
-                    'refund_reason' => $reason,
-                    'refunded_at' => now()->toISOString(),
+                "status" => PaymentStatusEnum::REFUNDED,
+                "metadata" => array_merge($payment->metadata ?? [], [
+                    "refund_response" => $response->data,
+                    "refund_amount" => $amount,
+                    "refund_reason" => $reason,
+                    "refunded_at" => now()->toISOString(),
                 ]),
             ]);
 
             // Update booking
             $payment->booking->update([
-                'payment_status' => PaymentStatusEnum::REFUNDED,
+                "payment_status" => PaymentStatusEnum::REFUNDED,
             ]);
 
-            Log::info('Refund processed', [
-                'payment_id' => $payment->id,
-                'amount' => $amount,
-                'reason' => $reason,
+            Log::info("Refund processed", [
+                "payment_id" => $payment->id,
+                "amount" => $amount,
+                "reason" => $reason,
             ]);
 
-            return $payment->refresh('booking');
+            return $payment->refresh("booking");
         });
     }
 
@@ -251,26 +276,28 @@ class PaymentService
     public function handleWebhook(
         string $gatewayName,
         array $payload,
-        ?string $signature = null
+        ?string $signature = null,
     ): ?Payment {
         try {
             $gateway = $this->getGateway($gatewayName);
 
             // Validate webhook signature
-            if (! $gateway->validateWebhookSignature($payload, $signature)) {
-                Log::warning('Invalid webhook signature', [
-                    'gateway' => $gatewayName,
+            if (!$gateway->validateWebhookSignature($payload, $signature)) {
+                Log::warning("Invalid webhook signature", [
+                    "gateway" => $gatewayName,
                 ]);
-                throw PaymentException::gatewayError('Invalid webhook signature');
+                throw PaymentException::gatewayError(
+                    "Invalid webhook signature",
+                );
             }
 
             // Handle webhook
             $response = $gateway->handleWebhook($payload);
 
-            if (! $response->success) {
-                Log::error('Webhook handling failed', [
-                    'gateway' => $gatewayName,
-                    'message' => $response->message,
+            if (!$response->success) {
+                Log::error("Webhook handling failed", [
+                    "gateway" => $gatewayName,
+                    "message" => $response->message,
                 ]);
 
                 return null;
@@ -278,19 +305,24 @@ class PaymentService
 
             // Find and update payment
             if ($response->reference) {
-                $payment = Payment::whereJsonContains('metadata->reference', $response->reference)->first();
+                $payment = Payment::whereJsonContains(
+                    "metadata->reference",
+                    $response->reference,
+                )->first();
 
                 if ($payment) {
-                    return $this->verifyPayment($response->reference, $gatewayName);
+                    return $this->verifyPayment(
+                        $response->reference,
+                        $gatewayName,
+                    );
                 }
             }
 
             return null;
-
         } catch (\Exception $e) {
-            Log::error('Webhook error', [
-                'gateway' => $gatewayName,
-                'error' => $e->getMessage(),
+            Log::error("Webhook error", [
+                "gateway" => $gatewayName,
+                "error" => $e->getMessage(),
             ]);
             throw $e;
         }
@@ -299,29 +331,42 @@ class PaymentService
     /**
      * Get payment statistics
      */
-    public function getPaymentStats(\Carbon\Carbon $from, \Carbon\Carbon $to): array
-    {
-        $payments = Payment::whereBetween('created_at', [$from, $to])->get();
+    public function getPaymentStats(
+        \Carbon\Carbon $from,
+        \Carbon\Carbon $to,
+    ): array {
+        $payments = Payment::whereBetween("created_at", [$from, $to])->get();
 
-        $completedPayments = $payments->where('status', PaymentStatusEnum::COMPLETED);
-        $failedPayments = $payments->where('status', PaymentStatusEnum::FAILED);
-        $refundedPayments = $payments->where('status', PaymentStatusEnum::REFUNDED);
+        $completedPayments = $payments->where(
+            "status",
+            PaymentStatusEnum::COMPLETED,
+        );
+        $failedPayments = $payments->where("status", PaymentStatusEnum::FAILED);
+        $refundedPayments = $payments->where(
+            "status",
+            PaymentStatusEnum::REFUNDED,
+        );
 
         return [
-            'period' => [
-                'from' => $from->toDateString(),
-                'to' => $to->toDateString(),
+            "period" => [
+                "from" => $from->toDateString(),
+                "to" => $to->toDateString(),
             ],
-            'total_payments' => $payments->count(),
-            'completed_payments' => $completedPayments->count(),
-            'failed_payments' => $failedPayments->count(),
-            'refunded_payments' => $refundedPayments->count(),
-            'total_amount' => round($completedPayments->sum('amount'), 2),
-            'refunded_amount' => round($refundedPayments->sum('amount'), 2),
-            'success_rate' => $payments->count() > 0
-                ? round(($completedPayments->count() / $payments->count()) * 100, 2)
-                : 0,
-            'by_gateway' => $this->getPaymentsByGateway($payments),
+            "total_payments" => $payments->count(),
+            "completed_payments" => $completedPayments->count(),
+            "failed_payments" => $failedPayments->count(),
+            "refunded_payments" => $refundedPayments->count(),
+            "total_amount" => round($completedPayments->sum("amount"), 2),
+            "refunded_amount" => round($refundedPayments->sum("amount"), 2),
+            "success_rate" =>
+                $payments->count() > 0
+                    ? round(
+                        ($completedPayments->count() / $payments->count()) *
+                            100,
+                        2,
+                    )
+                    : 0,
+            "by_gateway" => $this->getPaymentsByGateway($payments),
         ];
     }
 
@@ -330,15 +375,19 @@ class PaymentService
      */
     private function getPaymentsByGateway($payments): array
     {
-        return $payments->groupBy('payment_gateway')
+        return $payments
+            ->groupBy("payment_gateway")
             ->map(function ($gatewayPayments, $gateway) {
-                $completed = $gatewayPayments->where('status', PaymentStatusEnum::COMPLETED);
+                $completed = $gatewayPayments->where(
+                    "status",
+                    PaymentStatusEnum::COMPLETED,
+                );
 
                 return [
-                    'gateway' => $gateway,
-                    'total' => $gatewayPayments->count(),
-                    'completed' => $completed->count(),
-                    'amount' => round($completed->sum('amount'), 2),
+                    "gateway" => $gateway,
+                    "total" => $gatewayPayments->count(),
+                    "completed" => $completed->count(),
+                    "amount" => round($completed->sum("amount"), 2),
                 ];
             })
             ->values()
